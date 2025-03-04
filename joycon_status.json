@@ -1,4 +1,4 @@
-Archi of status:
+// Archi of status:
 {
     "battery": {
         "charging": int,  // 0 (not charging) or 1 (charging)
