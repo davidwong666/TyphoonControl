@@ -3,7 +3,6 @@ from joycon_rumble import RumbleJoyCon, RumbleData
 import time, atexit
 
 joycon_right = None
-joycon_left = None
 
 class Debug:
     ENABLED = True
