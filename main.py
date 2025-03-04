@@ -1,6 +1,7 @@
 from pyjoycon import JoyCon, get_R_id, get_L_id
 from joycon_rumble import RumbleJoyCon, RumbleData
 import json, time
+import atexit
 
 """
 Archi of status:
@@ -67,25 +68,31 @@ Archi of status:
 }
 """
 
+joycon_right = None
+joycon_left = None
 
 def initialize_joycons():
+    global joycon_right, joycon_left
     joycon_id_right = get_R_id()
-    joycon_id_left = get_L_id()
-
-    joycon_right = RumbleJoyCon(joycon_id_right)
-    joycon_left = RumbleJoyCon(joycon_id_left)
+    # joycon_id_left = get_L_id()
 
     print("vendor_id: ", joycon_id_right[0])
     print("product_id: ", joycon_id_right[1])
     print("serial: ", joycon_id_right[2])
 
-    joycon_right.get_status()
-    print(json.dumps(joycon_right.get_status(), indent=4))
+    joycon_right = RumbleJoyCon(*joycon_id_right)
+    # joycon_left = JoyCon(*joycon_id_left)
+    # joycon_right = RumbleJoyCon(*joycon_id_right)
+    # joycon_left = RumbleJoyCon(*joycon_id_left)
 
+    joycon_right.get_status()
+    # joycon_left = RumbleJoyCon(joycon_id_left)
+    print(json.dumps(joycon_right.get_status(), indent=4))
+    # print(json.dumps(joycon_left.get_status(), indent=4))
+
+    print("Joy-Cons initialized with rumble capability")
     return joycon_right, joycon_left
 
-
-# Example function to add rumble feedback to your application
 def provide_rumble_feedback(joycon, intensity=0.5, duration=0.5):
     """
     Provide haptic feedback through Joy-Con
@@ -106,8 +113,6 @@ def provide_rumble_feedback(joycon, intensity=0.5, duration=0.5):
 
     # Stop rumble
     joycon.rumble_stop()
-
-# Add these functions to your main.py
 
 def rumble_alert_pattern(joycon):
     """Provide an alert pattern - three short pulses"""
@@ -148,14 +153,19 @@ def cleanup():
     except Exception as e:
         print(f"Error during cleanup: {e}")
 
-# Add this to your main function
-import atexit
-atexit.register(cleanup)  # Register cleanup function to run at exit
-
 if __name__ == '__main__':
-    joycon_right, joycon_left = initialize_joycons()
+    initialize_joycons()
 
-    # provide_rumble_feedback(joycon_right, 0.7, 0.3)
+    atexit.register(cleanup)
 
+    if not joycon_right and not joycon_left:
+        print("No Joy-Cons detected. Running in fallback mode without rumble.")
+    else:
+        # Your code that uses Joy-Cons
+        if joycon_right:
+            print("Testing right Joy-Con rumble...")
+            provide_rumble_feedback(joycon_right, 0.5, 1.0)
 
-
+        if joycon_left:
+            print("Testing left Joy-Con rumble...")
+            provide_rumble_feedback(joycon_left, 0.5, 1.0)
