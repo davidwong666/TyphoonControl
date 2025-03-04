@@ -6,6 +6,10 @@ env/
 # PyCharm files
 .idea/
 *.iml
+*.iws
+*.ipr
+*.iws
+.idea_modules/
 
 # Python cache files
 __pycache__/
