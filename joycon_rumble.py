@@ -1,8 +1,6 @@
-import sys
-import time
 import math
 
-from pyjoycon import JoyCon, get_R_id, get_L_id
+from pyjoycon import JoyCon
 
 
 def clamp(x, min, max):
@@ -105,24 +103,3 @@ class RumbleData:
         # Debug.Log(string.Format("hf: {0:X4}", hf));
         # Debug.Log(string.Format("lf: {0:X2}", lf));
         return bytes(rumble_data);
-
-
-# if __name__ == "__main__":
-#     joycon_id_right = get_R_id()
-#     joycon_id_left = get_L_id()
-#
-#     joyconR = RumbleJoyCon(*joycon_id_right)
-#     joyconL = RumbleJoyCon(*joycon_id_left)
-#
-#     freq = 320
-#     amp = 0
-#     while True:
-#         data = RumbleData(freq / 2, freq, amp)
-#         b = data.GetData()
-#         joyconR._send_rumble(b)
-#         time.sleep(1.5)
-#         joyconL._send_rumble(b)
-#         time.sleep(1.5)
-#         if amp > 0.9:
-#             amp = 0
-#         amp += 0.1
