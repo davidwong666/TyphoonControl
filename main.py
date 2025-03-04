@@ -23,6 +23,7 @@ class Debug:
         if Debug.ENABLED:
             print(f"[INFO] {message}")
 
+
 def initialize_joycons():
     global joycon_right, joycon_left
 
@@ -45,6 +46,21 @@ def initialize_joycons():
     except Exception as e:
         Debug.error(f"Error initializing Joy-Cons: {e}")
         return None, None
+
+
+def clamp(value, min_value, max_value):
+    """
+    Clamps a value between a minimum and maximum value.
+
+    Args:
+        value: The value to clamp
+        min_value: The minimum allowed value
+        max_value: The maximum allowed value
+
+    Returns:
+        The clamped value (between min_value and max_value)
+    """
+    return max(min_value, min(max_value, value))
 
 
 def provide_rumble_feedback(joycon, intensity=0.5, frequency=160, duration=0.5):
@@ -150,38 +166,6 @@ def test_right_joycon_rumble():
         return False
 
 
-def rumble_alert_pattern(joycon):
-    """Provide an alert pattern - three short pulses"""
-    for _ in range(3):
-        provide_rumble_feedback(joycon, 0.8, 0.1)
-        time.sleep(0.1)
-
-
-def rumble_success_pattern(joycon):
-    """Provide a success pattern - increasing intensity"""
-    for i in range(5):
-        intensity = (i + 1) / 5
-        provide_rumble_feedback(joycon, intensity, 0.1)
-        time.sleep(0.05)
-
-
-def rumble_error_pattern(joycon):
-    """Provide an error pattern - strong long pulse"""
-    provide_rumble_feedback(joycon, 1.0, 0.7)
-
-
-def rumble_heartbeat(joycon, duration=5.0):
-    """Provide a heartbeat-like pattern for specified duration"""
-    start_time = time.time()
-    while time.time() - start_time < duration:
-        # Strong beat
-        provide_rumble_feedback(joycon, 0.7, 0.1)
-        time.sleep(0.1)
-        # Lighter beat
-        provide_rumble_feedback(joycon, 0.3, 0.1)
-        time.sleep(0.4)  # Longer pause between heartbeats
-
-
 def cleanup():
     """Stop all rumble and perform cleanup when exiting"""
     try:
@@ -194,7 +178,7 @@ def cleanup():
         print(f"Error during cleanup: {e}")
 
 
-def print_detailed_info_jc(joycon):
+def print_jc_info(joycon):
     if joycon:
         print("\nDetailed Joy-Con Information: ")
         for attr in dir(joycon):
@@ -208,6 +192,39 @@ def print_detailed_info_jc(joycon):
                 except:
                     print(f"  - {attr}: [Error accessing]")
 
+
+# def rumble_alert_pattern(joycon):
+#     """Provide an alert pattern - three short pulses"""
+#     for _ in range(3):
+#         provide_rumble_feedback(joycon, 0.8, 0.1)
+#         time.sleep(0.1)
+#
+#
+# def rumble_success_pattern(joycon):
+#     """Provide a success pattern - increasing intensity"""
+#     for i in range(5):
+#         intensity = (i + 1) / 5
+#         provide_rumble_feedback(joycon, intensity, 0.1)
+#         time.sleep(0.05)
+#
+#
+# def rumble_error_pattern(joycon):
+#     """Provide an error pattern - strong long pulse"""
+#     provide_rumble_feedback(joycon, 1.0, 0.7)
+#
+#
+# def rumble_heartbeat(joycon, duration=5.0):
+#     """Provide a heartbeat-like pattern for specified duration"""
+#     start_time = time.time()
+#     while time.time() - start_time < duration:
+#         # Strong beat
+#         provide_rumble_feedback(joycon, 0.7, 0.1)
+#         time.sleep(0.1)
+#         # Lighter beat
+#         provide_rumble_feedback(joycon, 0.3, 0.1)
+#         time.sleep(0.4)  # Longer pause between heartbeats
+
+
 if __name__ == "__main__":
     print("Initializing Joy-Cons...")
     joycon_right, joycon_left = initialize_joycons()
@@ -216,7 +233,7 @@ if __name__ == "__main__":
 
     if joycon_right:
         test_right_joycon_rumble()
-        # print_detailed_info_jc(joycon_right)
+        # print_jc_info(joycon_right)
     else:
         print("Right Joy-Con not initialized!!!")
 
