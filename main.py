@@ -1,7 +1,6 @@
 from pyjoycon import JoyCon, get_R_id, get_L_id
 from joycon_rumble import RumbleJoyCon, RumbleData
-import json, time
-import atexit
+import time, atexit
 
 joycon_right = None
 joycon_left = None
@@ -157,6 +156,7 @@ def rumble_alert_pattern(joycon):
         provide_rumble_feedback(joycon, 0.8, 0.1)
         time.sleep(0.1)
 
+
 def rumble_success_pattern(joycon):
     """Provide a success pattern - increasing intensity"""
     for i in range(5):
@@ -164,9 +164,11 @@ def rumble_success_pattern(joycon):
         provide_rumble_feedback(joycon, intensity, 0.1)
         time.sleep(0.05)
 
+
 def rumble_error_pattern(joycon):
     """Provide an error pattern - strong long pulse"""
     provide_rumble_feedback(joycon, 1.0, 0.7)
+
 
 def rumble_heartbeat(joycon, duration=5.0):
     """Provide a heartbeat-like pattern for specified duration"""
@@ -179,6 +181,7 @@ def rumble_heartbeat(joycon, duration=5.0):
         provide_rumble_feedback(joycon, 0.3, 0.1)
         time.sleep(0.4)  # Longer pause between heartbeats
 
+
 def cleanup():
     """Stop all rumble and perform cleanup when exiting"""
     try:
@@ -190,6 +193,21 @@ def cleanup():
     except Exception as e:
         print(f"Error during cleanup: {e}")
 
+
+def print_detailed_info_jc(joycon):
+    if joycon:
+        print("\nDetailed Joy-Con Information: ")
+        for attr in dir(joycon):
+            if not attr.startswith("__"):
+                try:
+                    value = getattr(joycon, attr)
+                    if callable(value):
+                        print(f"  - {attr}: [Method]")
+                    else:
+                        print(f"  - {attr}: {value}")
+                except:
+                    print(f"  - {attr}: [Error accessing]")
+
 if __name__ == "__main__":
     print("Initializing Joy-Cons...")
     joycon_right, joycon_left = initialize_joycons()
@@ -198,20 +216,10 @@ if __name__ == "__main__":
 
     if joycon_right:
         test_right_joycon_rumble()
-        # provide_rumble_feedback(joycon_right, 0.5, 1.0)
-
-        # Print detailed information about the Joy-Con object
-        # print("\nDetailed Right Joy-Con Information:")
-        # for attr in dir(joycon_right):
-        #     if not attr.startswith("__"):
-        #         try:
-        #             value = getattr(joycon_right, attr)
-        #             if callable(value):
-        #                 print(f"  - {attr}: [Method]")
-        #             else:
-        #                 print(f"  - {attr}: {value}")
-        #         except:
-        #             print(f"  - {attr}: [Error accessing]")
+        # print_detailed_info_jc(joycon_right)
     else:
         print("Right Joy-Con not initialized!!!")
+
+
+
 
