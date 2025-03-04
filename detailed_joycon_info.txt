@@ -1,0 +1,99 @@
+Python:
+for attr in dir(joycon_right):
+    if not attr.startswith("__"):
+        try:
+            value = getattr(joycon_right, attr)
+            if callable(value):
+                print(f"  - {attr}: [Method]")
+            else:
+                print(f"  - {attr}: {value}")
+        except:
+            print(f"  - {attr}: [Error accessing]")
+------------------------------------------------------------
+Detailed Right Joy-Con Information:
+  - _ACCEL_COEFF_X: 1
+  - _ACCEL_COEFF_Y: 1
+  - _ACCEL_COEFF_Z: 1
+  - _ACCEL_OFFSET_X: -210
+  - _ACCEL_OFFSET_Y: 307
+  - _ACCEL_OFFSET_Z: 415
+  - _GYRO_COEFF_X: 1
+  - _GYRO_COEFF_Y: 1
+  - _GYRO_COEFF_Z: 1
+  - _GYRO_OFFSET_X: -1
+  - _GYRO_OFFSET_Y: -33
+  - _GYRO_OFFSET_Z: -7
+  - _INPUT_REPORT_PERIOD: 0.015
+  - _INPUT_REPORT_SIZE: 49
+  - _RUMBLE_DATA: b'\x00\x00\x00\x00\x00\x00\x00\x00'
+  - _close: [Method]
+  - _get_nbit_from_input_report: [Method]
+  - _input_hooks: []
+  - _input_report: b'0\x84\x8e\x00\x00\x00\x00\x00\x00[\xb8K\x0e\xde\x92\xe9\xd6@\xa2i\x12\x16\xf7\xaf\xd2s\xae\xcc\xd1W\xb3\x14\x13\x07\xf5\t\xd4\xcb\xc0\xbc\xcb\xfc\xc3\xd6\x13\xf6\xf3\x94\xd4'
+  - _joycon_device: <hid.device object at 0x000001D202E93000>
+  - _open: [Method]
+  - _packet_number: 7
+  - _read_input_report: [Method]
+  - _read_joycon_data: [Method]
+  - _send_rumble: [Method]
+  - _send_subcmd_get_response: [Method]
+  - _setup_sensors: [Method]
+  - _spi_flash_read: [Method]
+  - _to_int16le_from_2bytes: [Method]
+  - _update_input_report: [Method]
+  - _update_input_report_thread: <Thread(Thread-1 (_update_input_report), started daemon 8268)>
+  - _write_output_report: [Method]
+  - color_body: (10, 185, 230)
+  - color_btn: (0, 30, 30)
+  - disconnect_device: [Method]
+  - enable_vibration: [Method]
+  - get_accel_x: [Method]
+  - get_accel_y: [Method]
+  - get_accel_z: [Method]
+  - get_battery_charging: [Method]
+  - get_battery_level: [Method]
+  - get_button_a: [Method]
+  - get_button_b: [Method]
+  - get_button_capture: [Method]
+  - get_button_charging_grip: [Method]
+  - get_button_down: [Method]
+  - get_button_home: [Method]
+  - get_button_l: [Method]
+  - get_button_l_stick: [Method]
+  - get_button_left: [Method]
+  - get_button_left_sl: [Method]
+  - get_button_left_sr: [Method]
+  - get_button_minus: [Method]
+  - get_button_plus: [Method]
+  - get_button_r: [Method]
+  - get_button_r_stick: [Method]
+  - get_button_right: [Method]
+  - get_button_right_sl: [Method]
+  - get_button_right_sr: [Method]
+  - get_button_up: [Method]
+  - get_button_x: [Method]
+  - get_button_y: [Method]
+  - get_button_zl: [Method]
+  - get_button_zr: [Method]
+  - get_gyro_x: [Method]
+  - get_gyro_y: [Method]
+  - get_gyro_z: [Method]
+  - get_status: [Method]
+  - get_stick_left_horizontal: [Method]
+  - get_stick_left_vertical: [Method]
+  - get_stick_right_horizontal: [Method]
+  - get_stick_right_vertical: [Method]
+  - is_left: [Method]
+  - is_right: [Method]
+  - product_id: 8199
+  - register_update_hook: [Method]
+  - rumble_simple: [Method]
+  - rumble_stop: [Method]
+  - serial: 28cf515f7ebd
+  - set_accel_calibration: [Method]
+  - set_gyro_calibration: [Method]
+  - set_player_lamp: [Method]
+  - set_player_lamp_flashing: [Method]
+  - set_player_lamp_on: [Method]
+  - simple_mode: False
+  - vendor_id: 1406

@@ -3,71 +3,6 @@ from joycon_rumble import RumbleJoyCon, RumbleData
 import json, time
 import atexit
 
-"""
-Archi of status:
-{
-    "battery": {
-        "charging": int,  // 0 (not charging) or 1 (charging)
-        "level": int      // Battery level (0-4)
-    },
-    
-    "buttons": {
-        "right": {
-            "y": int,     // 0 (not pressed) or 1 (pressed)
-            "x": int,
-            "b": int,
-            "a": int,
-            "sr": int,
-            "sl": int,
-            "r": int,
-            "zr": int
-        },
-        "shared": {
-            "minus": int,
-            "plus": int,
-            "r-stick": int,
-            "l-stick": int,
-            "home": int,
-            "capture": int,
-            "charging-grip": int
-        },
-        "left": {
-            "down": int,
-            "up": int,
-            "right": int,
-            "left": int,
-            "sr": int,
-            "sl": int,
-            "l": int,
-            "zl": int
-        }
-    },
-    
-    "analog-sticks": {
-        "left": {
-            "horizontal": int,  // Position values (range varies)
-            "vertical": int
-        },
-        "right": {
-            "horizontal": int,
-            "vertical": int
-        }
-    },
-    
-    "accel": {
-        "x": int,  // Accelerometer values
-        "y": int,
-        "z": int
-    },
-    
-    "gyro": {
-        "x": int,  // Gyroscope values
-        "y": int,
-        "z": int
-    }
-}
-"""
-
 joycon_right = None
 joycon_left = None
 
@@ -112,197 +47,109 @@ def initialize_joycons():
         Debug.error(f"Error initializing Joy-Cons: {e}")
         return None, None
 
-# def provide_rumble_feedback(joycon, intensity=0.5, duration=0.5):
-#     """
-#     Provide haptic feedback through Joy-Con
-#
-#     Args:
-#         joycon: RumbleJoyCon instance
-#         intensity: Vibration intensity from 0.0 to 1.0
-#         duration: Duration in seconds
-#     """
-#     # Create rumble data with specified intensity
-#     rumble_data = RumbleData(160, 320, intensity)
-#
-#     # Send rumble command
-#     joycon._send_rumble(rumble_data.GetData())
-#
-#     # Wait for specified duration
-#     time.sleep(duration)
-#
-#     # Stop rumble
-#     joycon.rumble_stop()
 
-
-
-def provide_rumble_feedback(joycon, intensity=0.5, duration=1.0):
+def provide_rumble_feedback(joycon, intensity=0.5, frequency=160, duration=0.5):
     """
-    Send rumble command to Joy-Con with detailed debugging
+    Provide haptic feedback through Joy-Con rumble with simplified parameters
 
     Args:
-        joycon: The Joy-Con object
-        intensity: Rumble intensity (0.0-1.0)
-        duration: How long to rumble in seconds
+        joycon: RumbleJoyCon instance
+        intensity: Rumble intensity from 0.0 to 1.0
+        frequency: Rumble frequency in Hz (recommended range: 40-320)
+        duration: Duration of rumble in seconds
+
+    Returns:
+        bool: True if rumble was successful, False otherwise
     """
-    if not joycon:
-        Debug.error("No Joy-Con provided to rumble function")
+    if not joycon or not isinstance(joycon, RumbleJoyCon):
+        print("Error: Invalid Joy-Con provided")
         return False
 
     try:
-        # Check which side this Joy-Con is
-        # side = "Unknown"
-        # if hasattr(joycon, "is_left"):
-            # side = "Left" if joycon.is_left else "Right"
-        side = "Right"
+        # Ensure vibration is enabled
+        joycon.enable_vibration(True)
 
-        Debug.info(f"Starting rumble on {side} Joy-Con (intensity={intensity}, duration={duration}s)")
+        # Clamp values to safe ranges
+        intensity = clamp(intensity, 0.0, 1.0)
+        frequency = clamp(frequency, 40, 320)
 
-        # Check Joy-Con connection status
-        if hasattr(joycon, "get_status"):
-            status = joycon.get_status()
-            Debug.info(f"{side} Joy-Con status: {status}")
+        # Create rumble data with the specified parameters
+        # Using both high and low frequency for a fuller rumble feel
+        rumble_data = RumbleData(frequency / 2, frequency, intensity)
 
-        # Check available methods
-        Debug.info(f"Available methods: {[m for m in dir(joycon) if not m.startswith('_') or m == '_send_rumble']}")
-
-        # Try to send rumble command
-        if hasattr(joycon, "rumble"):
-            Debug.info(f"Using joycon.rumble({intensity}) method")
-            joycon.rumble(intensity)
-            result = True
-        elif hasattr(joycon, "set_rumble"):
-            Debug.info(f"Using joycon.set_rumble({intensity}) method")
-            joycon.set_rumble(intensity)
-            result = True
-        elif hasattr(joycon, "_send_rumble"):
-            Debug.info("Using joycon._send_rumble() method")
-            # This is a lower-level method that might need specific data format
-            # Check if we need to create rumble data
-            if 'RumbleData' in globals():
-                Debug.info(f"Creating RumbleData with intensity {intensity}")
-                rumble_data = RumbleData(160, 320, intensity)  # Typical frequencies
-                joycon._send_rumble(rumble_data.GetData())
-            else:
-                Debug.error("RumbleData class not found")
-                return False
-            result = True
-        else:
-            Debug.error(f"No rumble methods found on {side} Joy-Con")
-            return False
+        # Send the rumble command
+        joycon._send_rumble(rumble_data.GetData())
 
         # Wait for the specified duration
-        Debug.info(f"Rumble started, waiting for {duration}s")
-        import time
         time.sleep(duration)
 
-        # Stop rumble
-        Debug.info(f"Stopping rumble on {side} Joy-Con")
-        if hasattr(joycon, "rumble_stop"):
-            joycon.rumble_stop()
-        elif hasattr(joycon, "set_rumble"):
-            joycon.set_rumble(0)
-        elif hasattr(joycon, "_send_rumble"):
-            # Send empty rumble data
-            empty_data = bytes([0x00] * 8)
-            joycon._send_rumble(empty_data)
+        # Stop the rumble
+        joycon.rumble_stop()
 
-        Debug.info(f"Rumble sequence completed on {side} Joy-Con")
-        return result
+        return True
 
     except Exception as e:
-        Debug.error(f"Error during rumble: {str(e)}")
+        print(f"Rumble error: {str(e)}")
+        return False
+
+
+def test_right_joycon_rumble():
+    """Test rumble specifically on the right Joy-Con using the available methods"""
+    global joycon_right
+
+    if not joycon_right:
+        print("Right Joy-Con not detected.")
+        return False
+
+    print("\n=== Testing Right Joy-Con Rumble ===")
+
+    try:
+        # Step 1: Enable vibration first
+        print("Step 1: Enabling vibration...")
+        joycon_right.enable_vibration()
+        print("Vibration enabled")
+
+        # Step 2: Test rumble_simple method (no parameters)
+        print("\nStep 2: Testing rumble_simple method...")
+        print("Starting rumble...")
+        joycon_right.rumble_simple()  # No parameters here
+
+        import time
+        print("Rumbling for 2 seconds...")
+        time.sleep(2.0)
+
+        # Step 3: Stop rumble
+        print("\nStep 3: Stopping rumble...")
+        joycon_right.rumble_stop()
+        print("Rumble stopped")
+
+        # Step 4: Try using RumbleData for custom rumble patterns
+        print("\nStep 4: Testing custom rumble with RumbleData (low intensity)...")
+        low_rumble = RumbleData(80, 160, 0.3)  # low freq, high freq, amplitude
+        joycon_right._send_rumble(low_rumble.GetData())
+        print("Low intensity rumbling for 2 seconds...")
+        time.sleep(2.0)
+        joycon_right.rumble_stop()
+        print("Rumble stopped")
+
+        # Step 5: Try higher intensity rumble
+        print("\nStep 5: Testing higher intensity rumble...")
+        high_rumble = RumbleData(120, 240, 0.7)  # stronger rumble
+        joycon_right._send_rumble(high_rumble.GetData())
+        print("Higher intensity rumbling for 2 seconds...")
+        time.sleep(2.0)
+        joycon_right.rumble_stop()
+        print("Rumble stopped")
+
+        print("\nRumble testing completed.")
+        return True
+
+    except Exception as e:
+        print(f"Error during rumble testing: {str(e)}")
         import traceback
         traceback.print_exc()
         return False
 
-# def test_right_joycon_rumble():
-#     """Test rumble specifically on the right Joy-Con with detailed debugging"""
-#     global joycon_right
-#
-#     if not joycon_right:
-#         print("Right Joy-Con not detected.")
-#         return False
-#
-#     print("\n=== Testing Right Joy-Con Rumble ===")
-#
-#     # 1. Check Joy-Con status and properties
-#     print("\nStep 1: Checking Joy-Con properties")
-#     Debug.info(f"Joy-Con object type: {type(joycon_right)}")
-#     Debug.info(f"Available methods: {[m for m in dir(joycon_right) if not m.startswith('__')]}")
-#
-#     # 2. Check if rumble needs to be enabled first
-#     print("\nStep 2: Enabling rumble (if method exists)")
-#     if hasattr(joycon_right, "enable_rumble"):
-#         try:
-#             joycon_right.enable_rumble()
-#             Debug.info("Rumble explicitly enabled")
-#         except Exception as e:
-#             Debug.error(f"Error enabling rumble: {e}")
-#
-#     # 3. Test with different rumble patterns
-#     print("\nStep 3: Testing different rumble patterns")
-#
-#     # Pattern 1: Short, strong pulse
-#     print("\nPattern 1: Short, strong pulse")
-#     provide_rumble_feedback(joycon_right, intensity=1.0, duration=0.5)
-#     import time
-#     time.sleep(1.0)  # Wait between tests
-#
-#     # Pattern 2: Medium, longer rumble
-#     print("\nPattern 2: Medium, longer rumble")
-#     provide_rumble_feedback(joycon_right, intensity=0.5, duration=1.0)
-#     time.sleep(1.0)
-#
-#     # Pattern 3: Gentle rumble
-#     print("\nPattern 3: Gentle rumble")
-#     provide_rumble_feedback(joycon_right, intensity=0.2, duration=1.5)
-#     time.sleep(1.0)
-#
-#     # 4. Try direct method calls if available
-#     print("\nStep 4: Trying direct method calls")
-#
-#     try:
-#         if hasattr(joycon_right, "rumble"):
-#             Debug.info("Calling joycon_right.rumble(1.0) directly")
-#             joycon_right.rumble(1.0)
-#             time.sleep(1.0)
-#             Debug.info("Stopping rumble")
-#             if hasattr(joycon_right, "rumble_stop"):
-#                 joycon_right.rumble_stop()
-#             else:
-#                 joycon_right.rumble(0)
-#         elif hasattr(joycon_right, "_send_rumble"):
-#             Debug.info("Trying low-level _send_rumble method")
-#             # Try different rumble data patterns
-#             for data in [
-#                 bytes([0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40]),  # Strong
-#                 bytes([0x00, 0x01, 0x10, 0x10, 0x00, 0x01, 0x10, 0x10])  # Medium
-#             ]:
-#                 Debug.info(f"Sending rumble data: {data.hex()}")
-#                 joycon_right._send_rumble(data)
-#                 time.sleep(1.0)
-#                 # Stop rumble
-#                 joycon_right._send_rumble(bytes([0x00] * 8))
-#                 time.sleep(0.5)
-#     except Exception as e:
-#         Debug.error(f"Error during direct rumble calls: {e}")
-#
-#     # 5. Check if there's any special initialization needed
-#     print("\nStep 5: Checking for special initialization methods")
-#     special_methods = ["initialize", "setup", "prepare", "calibrate"]
-#     for method_name in special_methods:
-#         if hasattr(joycon_right, method_name):
-#             try:
-#                 Debug.info(f"Calling {method_name}() method")
-#                 method = getattr(joycon_right, method_name)
-#                 method()
-#                 Debug.info(f"Called {method_name}(), trying rumble again")
-#                 provide_rumble_feedback(joycon_right, 1.0, 1.0)
-#             except Exception as e:
-#                 Debug.error(f"Error calling {method_name}(): {e}")
-#
-#     print("\nRight Joy-Con rumble testing completed.")
-#     return True
 
 def rumble_alert_pattern(joycon):
     """Provide an alert pattern - three short pulses"""
@@ -337,20 +184,22 @@ def cleanup():
     try:
         if 'joycon_right' in globals():
             joycon_right.rumble_stop()
-        if 'joycon_left' in globals():
-            joycon_left.rumble_stop()
+        # if 'joycon_left' in globals():
+        #     joycon_left.rumble_stop()
         print("Joy-Con rumble stopped")
     except Exception as e:
         print(f"Error during cleanup: {e}")
-
 
 if __name__ == "__main__":
     print("Initializing Joy-Cons...")
     joycon_right, joycon_left = initialize_joycons()
 
+    atexit.register(cleanup)
+
     if joycon_right:
-        # test_right_joycon_rumble()
-        provide_rumble_feedback(joycon_right, 0.5, 1.0)
+        test_right_joycon_rumble()
+        # provide_rumble_feedback(joycon_right, 0.5, 1.0)
+
         # Print detailed information about the Joy-Con object
         # print("\nDetailed Right Joy-Con Information:")
         # for attr in dir(joycon_right):
@@ -364,5 +213,5 @@ if __name__ == "__main__":
         #         except:
         #             print(f"  - {attr}: [Error accessing]")
     else:
-        print("Right Joy-Con not initialized successfully.")
+        print("Right Joy-Con not initialized!!!")
 
