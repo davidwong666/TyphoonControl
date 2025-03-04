@@ -1,4 +1,4 @@
-from pyjoycon import JoyCon, get_R_id, get_L_id
+from pyjoycon import get_R_id, get_L_id
 from joycon_rumble import RumbleJoyCon, RumbleData
 import time, atexit
 
@@ -24,28 +24,23 @@ class Debug:
             print(f"[INFO] {message}")
 
 
-def initialize_joycons():
-    global joycon_right, joycon_left
+def initialize_right_joycon():
+    global joycon_right
 
     try :
         joycon_id_right = get_R_id()
-        # joycon_id_left = get_L_id()
 
         Debug.info(f"Right Joy-Con: vendor_id={joycon_id_right[0]},"
         f"product_id={joycon_id_right[1]},"
         f"serial={joycon_id_right[2]}")
-        # Debug.info(f"Left Joy-Con: vendor_id={joycon_id_left[0]},"
-        # f"product_id={joycon_id_left[1]},"
-        # f"serial={joycon_id_left[2]}")
 
         joycon_right = RumbleJoyCon( * joycon_id_right)
-        # joycon_left = RumbleJoyCon( * joycon_id_left)
 
-        print("Joy-Cons initialized with rumble capability")
-        return joycon_right, joycon_left
+        Debug.info("Joy-Cons initialized with rumble capability")
+        return joycon_right
     except Exception as e:
         Debug.error(f"Error initializing Joy-Cons: {e}")
-        return None, None
+        return None
 
 
 def clamp(value, min_value, max_value):
@@ -227,7 +222,7 @@ def print_jc_info(joycon):
 
 if __name__ == "__main__":
     print("Initializing Joy-Cons...")
-    joycon_right, joycon_left = initialize_joycons()
+    joycon_right = initialize_right_joycon()
 
     atexit.register(cleanup)
 
