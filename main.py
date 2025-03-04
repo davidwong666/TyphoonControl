@@ -94,17 +94,17 @@ def initialize_joycons():
 
     try :
         joycon_id_right = get_R_id()
-        joycon_id_left = get_L_id()
+        # joycon_id_left = get_L_id()
 
         Debug.info(f"Right Joy-Con: vendor_id={joycon_id_right[0]},"
         f"product_id={joycon_id_right[1]},"
         f"serial={joycon_id_right[2]}")
-        Debug.info(f"Left Joy-Con: vendor_id={joycon_id_left[0]},"
-        f"product_id={joycon_id_left[1]},"
-        f"serial={joycon_id_left[2]}")
+        # Debug.info(f"Left Joy-Con: vendor_id={joycon_id_left[0]},"
+        # f"product_id={joycon_id_left[1]},"
+        # f"serial={joycon_id_left[2]}")
 
         joycon_right = RumbleJoyCon( * joycon_id_right)
-        joycon_left = RumbleJoyCon( * joycon_id_left)
+        # joycon_left = RumbleJoyCon( * joycon_id_left)
 
         print("Joy-Cons initialized with rumble capability")
         return joycon_right, joycon_left
@@ -133,6 +133,8 @@ def initialize_joycons():
 #     # Stop rumble
 #     joycon.rumble_stop()
 
+
+
 def provide_rumble_feedback(joycon, intensity=0.5, duration=1.0):
     """
     Send rumble command to Joy-Con with detailed debugging
@@ -148,9 +150,10 @@ def provide_rumble_feedback(joycon, intensity=0.5, duration=1.0):
 
     try:
         # Check which side this Joy-Con is
-        side = "Unknown"
-        if hasattr(joycon, "is_left"):
-            side = "Left" if joycon.is_left else "Right"
+        # side = "Unknown"
+        # if hasattr(joycon, "is_left"):
+            # side = "Left" if joycon.is_left else "Right"
+        side = "Right"
 
         Debug.info(f"Starting rumble on {side} Joy-Con (intensity={intensity}, duration={duration}s)")
 
@@ -212,39 +215,94 @@ def provide_rumble_feedback(joycon, intensity=0.5, duration=1.0):
         traceback.print_exc()
         return False
 
-def test_joycon_rumble():
-    """Test rumble on both Joy-Cons with detailed feedback"""
-    global joycon_right, joycon_left
-
-    if not joycon_right and not joycon_left:
-        print("No Joy-Cons detected. Running in fallback mode without rumble.")
-        return False
-
-    success = False
-
-    # Test right Joy-Con
-    if joycon_right:
-        print("\n=== Testing Right Joy-Con Rumble ===")
-        # Test with different intensities
-        for intensity in [0.2, 0.5, 1.0]:
-            print(f"\nTrying intensity: {intensity}")
-            if provide_rumble_feedback(joycon_right, intensity, 1.0):
-                success = True
-            import time
-            time.sleep(0.5)  # Pause between tests
-
-    # Test left Joy-Con
-    if joycon_left:
-        print("\n=== Testing Left Joy-Con Rumble ===")
-        # Test with different intensities
-        for intensity in [0.2, 0.5, 1.0]:
-            print(f"\nTrying intensity: {intensity}")
-            if provide_rumble_feedback(joycon_left, intensity, 1.0):
-                success = True
-            import time
-            time.sleep(0.5)  # Pause between tests
-
-    return success
+# def test_right_joycon_rumble():
+#     """Test rumble specifically on the right Joy-Con with detailed debugging"""
+#     global joycon_right
+#
+#     if not joycon_right:
+#         print("Right Joy-Con not detected.")
+#         return False
+#
+#     print("\n=== Testing Right Joy-Con Rumble ===")
+#
+#     # 1. Check Joy-Con status and properties
+#     print("\nStep 1: Checking Joy-Con properties")
+#     Debug.info(f"Joy-Con object type: {type(joycon_right)}")
+#     Debug.info(f"Available methods: {[m for m in dir(joycon_right) if not m.startswith('__')]}")
+#
+#     # 2. Check if rumble needs to be enabled first
+#     print("\nStep 2: Enabling rumble (if method exists)")
+#     if hasattr(joycon_right, "enable_rumble"):
+#         try:
+#             joycon_right.enable_rumble()
+#             Debug.info("Rumble explicitly enabled")
+#         except Exception as e:
+#             Debug.error(f"Error enabling rumble: {e}")
+#
+#     # 3. Test with different rumble patterns
+#     print("\nStep 3: Testing different rumble patterns")
+#
+#     # Pattern 1: Short, strong pulse
+#     print("\nPattern 1: Short, strong pulse")
+#     provide_rumble_feedback(joycon_right, intensity=1.0, duration=0.5)
+#     import time
+#     time.sleep(1.0)  # Wait between tests
+#
+#     # Pattern 2: Medium, longer rumble
+#     print("\nPattern 2: Medium, longer rumble")
+#     provide_rumble_feedback(joycon_right, intensity=0.5, duration=1.0)
+#     time.sleep(1.0)
+#
+#     # Pattern 3: Gentle rumble
+#     print("\nPattern 3: Gentle rumble")
+#     provide_rumble_feedback(joycon_right, intensity=0.2, duration=1.5)
+#     time.sleep(1.0)
+#
+#     # 4. Try direct method calls if available
+#     print("\nStep 4: Trying direct method calls")
+#
+#     try:
+#         if hasattr(joycon_right, "rumble"):
+#             Debug.info("Calling joycon_right.rumble(1.0) directly")
+#             joycon_right.rumble(1.0)
+#             time.sleep(1.0)
+#             Debug.info("Stopping rumble")
+#             if hasattr(joycon_right, "rumble_stop"):
+#                 joycon_right.rumble_stop()
+#             else:
+#                 joycon_right.rumble(0)
+#         elif hasattr(joycon_right, "_send_rumble"):
+#             Debug.info("Trying low-level _send_rumble method")
+#             # Try different rumble data patterns
+#             for data in [
+#                 bytes([0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40]),  # Strong
+#                 bytes([0x00, 0x01, 0x10, 0x10, 0x00, 0x01, 0x10, 0x10])  # Medium
+#             ]:
+#                 Debug.info(f"Sending rumble data: {data.hex()}")
+#                 joycon_right._send_rumble(data)
+#                 time.sleep(1.0)
+#                 # Stop rumble
+#                 joycon_right._send_rumble(bytes([0x00] * 8))
+#                 time.sleep(0.5)
+#     except Exception as e:
+#         Debug.error(f"Error during direct rumble calls: {e}")
+#
+#     # 5. Check if there's any special initialization needed
+#     print("\nStep 5: Checking for special initialization methods")
+#     special_methods = ["initialize", "setup", "prepare", "calibrate"]
+#     for method_name in special_methods:
+#         if hasattr(joycon_right, method_name):
+#             try:
+#                 Debug.info(f"Calling {method_name}() method")
+#                 method = getattr(joycon_right, method_name)
+#                 method()
+#                 Debug.info(f"Called {method_name}(), trying rumble again")
+#                 provide_rumble_feedback(joycon_right, 1.0, 1.0)
+#             except Exception as e:
+#                 Debug.error(f"Error calling {method_name}(): {e}")
+#
+#     print("\nRight Joy-Con rumble testing completed.")
+#     return True
 
 def rumble_alert_pattern(joycon):
     """Provide an alert pattern - three short pulses"""
@@ -290,21 +348,21 @@ if __name__ == "__main__":
     print("Initializing Joy-Cons...")
     joycon_right, joycon_left = initialize_joycons()
 
-    print("\nTesting Joy-Con rumble functionality...")
-    if test_joycon_rumble():
-        print("\nRumble test completed. Did you feel the rumble?")
-    else:
-        print("\nRumble test failed. No rumble detected.")
-
-    print("\nDumping Joy-Con information for debugging:")
     if joycon_right:
-        print("\nRight Joy-Con attributes:")
-        for attr in dir(joycon_right):
-            if not attr.startswith("__"):
-                print(f"  - {attr}")
+        # test_right_joycon_rumble()
+        provide_rumble_feedback(joycon_right, 0.5, 1.0)
+        # Print detailed information about the Joy-Con object
+        # print("\nDetailed Right Joy-Con Information:")
+        # for attr in dir(joycon_right):
+        #     if not attr.startswith("__"):
+        #         try:
+        #             value = getattr(joycon_right, attr)
+        #             if callable(value):
+        #                 print(f"  - {attr}: [Method]")
+        #             else:
+        #                 print(f"  - {attr}: {value}")
+        #         except:
+        #             print(f"  - {attr}: [Error accessing]")
+    else:
+        print("Right Joy-Con not initialized successfully.")
 
-    if joycon_left:
-        print("\nLeft Joy-Con attributes:")
-        for attr in dir(joycon_left):
-            if not attr.startswith("__"):
-                print(f"  - {attr}")
