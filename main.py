@@ -205,18 +205,6 @@ def print_jc_info(joycon):
 # def rumble_error_pattern(joycon):
 #     """Provide an error pattern - strong long pulse"""
 #     provide_rumble_feedback(joycon, 1.0, 0.7)
-#
-#
-# def rumble_heartbeat(joycon, duration=5.0):
-#     """Provide a heartbeat-like pattern for specified duration"""
-#     start_time = time.time()
-#     while time.time() - start_time < duration:
-#         # Strong beat
-#         provide_rumble_feedback(joycon, 0.7, 0.1)
-#         time.sleep(0.1)
-#         # Lighter beat
-#         provide_rumble_feedback(joycon, 0.3, 0.1)
-#         time.sleep(0.4)  # Longer pause between heartbeats
 
 
 if __name__ == "__main__":
@@ -227,7 +215,7 @@ if __name__ == "__main__":
 
     if joycon_right:
         test_right_joycon_rumble()
-        # print_jc_info(joycon_right)
+        print_jc_info(joycon_right)
     else:
         print("Right Joy-Con not initialized!!!")
 
