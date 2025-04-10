@@ -1,6 +1,6 @@
 from pyjoycon import get_R_id, get_L_id
 from joycon_rumble import RumbleJoyCon, RumbleData
-import time, atexit
+import time, atexit, sys
 
 joycon_right = None
 
@@ -24,22 +24,73 @@ class Debug:
 
 
 def initialize_right_joycon():
+    """Initializes the right Joy-Con."""
     global joycon_right
 
     try :
         joycon_id_right = get_R_id()
 
-        Debug.info(f"Right Joy-Con: vendor_id={joycon_id_right[0]},"
-        f"product_id={joycon_id_right[1]},"
-        f"serial={joycon_id_right[2]}")
+        if not joycon_id_right:
+            Debug.error("Right Joy-Con not found. Ensure it's paired and connected via Bluetooth.")
+            return None
 
-        joycon_right = RumbleJoyCon( * joycon_id_right)
+        Debug.info(f"Found Right Joy-Con: vendor_id={joycon_id_right[0]}, "
+                   f"product_id={joycon_id_right[1]}, "
+                   f"serial={joycon_id_right[2]}")
 
-        Debug.info("Joy-Cons initialized with rumble capability")
+        joycon_right = RumbleJoyCon(*joycon_id_right)
+
+        Debug.info("Right Joy-Con initialized.")
+
+        # Give it a moment to stabilize after connection
+        time.sleep(0.5)
+
         return joycon_right
     except Exception as e:
-        Debug.error(f"Error initializing Joy-Cons: {e}")
+        Debug.error(f"Error initializing Right Joy-Con: {e}")
+        import traceback
+        traceback.print_exc()
         return None
+
+
+def read_and_print_motion_data(joycon):
+    """Continuously reads and prints motion data from the Joy-Con."""
+    if not joycon:
+        Debug.error("Joy-Con object is invalid.")
+        return
+
+    print("\n--- Reading Right Joy-Con Motion Data (Press Ctrl+C to stop) ---")
+    try:
+        while True:
+            try:
+                accel_x = joycon.get_accel_x()
+                accel_y = joycon.get_accel_y()
+                accel_z = joycon.get_accel_z()
+
+                gyro_x = joycon.get_gyro_x()
+                gyro_y = joycon.get_gyro_y()
+                gyro_z = joycon.get_gyro_z()
+
+                # Print data on a single line, overwriting the previous line
+                print(f"\rAccel: X={accel_x: 5d}, Y={accel_y: 5d}, Z={accel_z: 5d} | "
+                      f"Gyro: X={gyro_x: 5d}, Y={gyro_y: 5d}, Z={gyro_z: 5d}   ",
+                      end="")
+                sys.stdout.flush() # Ensure the line is updated immediately
+
+            except Exception as e:
+                # Handle potential errors during data reading (e.g., disconnection)
+                Debug.error(f"\nError reading sensor data: {e}")
+                # Optionally break the loop or try to reconnect
+                break
+
+            # Control the update rate (e.g., 10 times per second)
+            time.sleep(0.2)
+
+    except KeyboardInterrupt:
+        print("\nStopping data reading.")
+    finally:
+        # Clear the line on exit
+        print("\r" + " " * 80 + "\r", end="")
 
 
 def clamp(value, min_value, max_value):
@@ -161,15 +212,22 @@ def test_right_joycon_rumble():
 
 
 def cleanup():
-    """Stop all rumble and perform cleanup when exiting"""
+    """Perform cleanup when exiting"""
+    global joycon_right
+    print("Exiting script...")
+    # Although we aren't using rumble now, stopping it is harmless
+    # and good practice if the JoyCon object supports it.
     try:
-        if 'joycon_right' in globals():
+        if joycon_right and hasattr(joycon_right, 'rumble_stop'):
+            Debug.info("Stopping any potential Joy-Con rumble...")
             joycon_right.rumble_stop()
-        # if 'joycon_left' in globals():
-        #     joycon_left.rumble_stop()
-        print("Joy-Con rumble stopped")
+        # Optional: Explicitly disconnect if needed, though pyjoycon often handles this
+        if joycon_right and hasattr(joycon_right, 'disconnect_device'):
+           Debug.info("Disconnecting Joy-Con...")
+           joycon_right.disconnect_device()
+        Debug.info("Cleanup complete.")
     except Exception as e:
-        print(f"Error during cleanup: {e}")
+        Debug.error(f"Error during cleanup: {e}")
 
 
 def print_jc_info(joycon):
@@ -208,17 +266,19 @@ def print_jc_info(joycon):
 
 
 if __name__ == "__main__":
+    # Register cleanup function to run on exit
+    atexit.register(cleanup)
+
     print("Initializing Joy-Cons...")
     joycon_right = initialize_right_joycon()
 
-    atexit.register(cleanup)
-
     if joycon_right:
-        test_right_joycon_rumble()
+        # test_right_joycon_rumble()
         print_jc_info(joycon_right)
+        read_and_print_motion_data(joycon_right)
     else:
         print("Right Joy-Con not initialized!!!")
 
-
-
-
+    # The script will wait in read_and_print_motion_data until Ctrl+C is pressed
+    # or an error occurs. The cleanup function runs automatically upon exit.
+    print("Script finished.")
