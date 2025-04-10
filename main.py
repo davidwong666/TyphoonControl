@@ -1,8 +1,29 @@
 from pyjoycon import get_R_id, get_L_id
-from joycon_rumble import RumbleJoyCon, RumbleData
-import time, atexit, sys
+from joycon_rumble import RumbleJoyCon, RumbleData, clamp
+import math
+import sys
+import time
+import atexit
 
 joycon_right = None
+
+# --- Constants for Motion-Based Rumble ---
+# Estimated magnitude of acceleration vector due to gravity when at rest
+# Calculated from your example: sqrt(566^2 + (-383)^2 + (-4517)^2) ≈ 4568
+# TODO: Adjust this based on observation if needed.
+RESTING_ACCEL_MAGNITUDE = 4500
+
+# How much acceleration magnitude *above resting* corresponds to full rumble intensity?
+# This requires tuning. Higher value means you need to shake harder for max rumble.
+MAX_MOTION_ACCEL_MAGNITUDE = 10000 # TODO: Example value, adjust as needed
+
+# TODO: Rumble frequencies (can be adjusted for different feel)
+RUMBLE_LOW_FREQ = 80  # Hz
+RUMBLE_HIGH_FREQ = 160 # Hz
+
+# TODO: Minimum intensity threshold to activate rumble (prevents constant low rumble)
+RUMBLE_INTENSITY_THRESHOLD = 0.05
+# --- End Constants ---
 
 class Debug:
     ENABLED = True
@@ -40,11 +61,12 @@ def initialize_right_joycon():
 
         joycon_right = RumbleJoyCon(*joycon_id_right)
 
-        Debug.info("Right Joy-Con initialized.")
+        # Optional: Enable vibration explicitly if needed, though _send_rumble might handle it
+        joycon_right.enable_vibration(True)
+        time.sleep(0.1) # Short delay after enabling vibration
 
-        # Give it a moment to stabilize after connection
-        time.sleep(0.5)
-
+        Debug.info("Right Joy-Con initialized for rumble.")
+        time.sleep(0.5)  # Allow connection to stabilize
         return joycon_right
     except Exception as e:
         Debug.error(f"Error initializing Right Joy-Con: {e}")
@@ -53,13 +75,13 @@ def initialize_right_joycon():
         return None
 
 
-def read_and_print_motion_data(joycon):
-    """Continuously reads and prints motion data from the Joy-Con."""
+def read_and_print_calculated_motion(joycon):
+    """Continuously reads sensor data, calculates magnitudes, and prints them."""
     if not joycon:
         Debug.error("Joy-Con object is invalid.")
         return
 
-    print("\n--- Reading Right Joy-Con Motion Data (Press Ctrl+C to stop) ---")
+    print("\n--- Reading & Calculating Motion Data (Press Ctrl+C to stop) ---")
     try:
         while True:
             try:
@@ -71,41 +93,47 @@ def read_and_print_motion_data(joycon):
                 gyro_y = joycon.get_gyro_y()
                 gyro_z = joycon.get_gyro_z()
 
-                # Print data on a single line, overwriting the previous line
-                print(f"\rAccel: X={accel_x: 5d}, Y={accel_y: 5d}, Z={accel_z: 5d} | "
-                      f"Gyro: X={gyro_x: 5d}, Y={gyro_y: 5d}, Z={gyro_z: 5d}   ",
-                      end="")
-                sys.stdout.flush() # Ensure the line is updated immediately
+                # --- Calculations ---
+                # Calculate the magnitude of the acceleration vector
+                accel_magnitude = math.sqrt(accel_x ** 2 + accel_y ** 2 + accel_z ** 2)
 
+                # Calculate the magnitude of the gyroscope vector (angular velocity magnitude)
+                gyro_magnitude = math.sqrt(gyro_x ** 2 + gyro_y ** 2 + gyro_z ** 2)
+
+                # Calculate acceleration magnitude excluding estimated gravity (motion intensity)
+                # This is a simplified approach; true separation requires sensor fusion (more complex)
+                motion_accel_magnitude = abs(accel_magnitude - RESTING_ACCEL_MAGNITUDE)
+
+                # --- Printing ---
+                # Print raw data and calculated magnitudes on a single updating line
+                print(f"\rAcc:({accel_x: 5d},{accel_y: 5d},{accel_z: 5d}) Mag:{accel_magnitude: >6.1f} | "
+                      f"Gyr:({gyro_x: 5d},{gyro_y: 5d},{gyro_z: 5d}) Mag:{gyro_magnitude: >6.1f} | "
+                      f"Motion Acc Mag:{motion_accel_magnitude: >6.1f}   ",
+                      end="")
+                sys.stdout.flush()
+
+            except AttributeError as e:
+                # Catch cases where sensor data might not be ready immediately
+                if "'NoneType' object has no attribute" in str(e):
+                    Debug.log("Sensor data not available yet, waiting...")
+                    time.sleep(0.1)  # Wait a bit longer if data isn't ready
+                    continue
+                else:
+                    Debug.error(f"\nAttributeError reading sensor data: {e}")
+                    break  # Exit on other AttributeErrors
             except Exception as e:
-                # Handle potential errors during data reading (e.g., disconnection)
-                Debug.error(f"\nError reading sensor data: {e}")
-                # Optionally break the loop or try to reconnect
+                Debug.error(f"\nError reading/calculating sensor data: {e}")
                 break
 
             # Control the update rate (e.g., 10 times per second)
-            time.sleep(0.2)
+            # Faster gives smoother view of changes, but uses more CPU
+            time.sleep(0.1)
 
     except KeyboardInterrupt:
         print("\nStopping data reading.")
     finally:
         # Clear the line on exit
-        print("\r" + " " * 80 + "\r", end="")
-
-
-def clamp(value, min_value, max_value):
-    """
-    Clamps a value between a minimum and maximum value.
-
-    Args:
-        value: The value to clamp
-        min_value: The minimum allowed value
-        max_value: The maximum allowed value
-
-    Returns:
-        The clamped value (between min_value and max_value)
-    """
-    return max(min_value, min(max_value, value))
+        print("\r" + " " * 120 + "\r", end="")  # Clear a wider space
 
 
 def provide_rumble_feedback(joycon, intensity=0.5, frequency=160, duration=0.5):
@@ -210,21 +238,21 @@ def test_right_joycon_rumble():
         traceback.print_exc()
         return False
 
+# --- Utility and Cleanup functions ---
 
 def cleanup():
     """Perform cleanup when exiting"""
     global joycon_right
-    print("Exiting script...")
-    # Although we aren't using rumble now, stopping it is harmless
-    # and good practice if the JoyCon object supports it.
+    print("\nExiting script...")
     try:
         if joycon_right and hasattr(joycon_right, 'rumble_stop'):
-            Debug.info("Stopping any potential Joy-Con rumble...")
+            # Stop rumble just in case it was left on by manual testing etc.
+            Debug.info("Ensuring Joy-Con rumble is stopped...")
             joycon_right.rumble_stop()
-        # Optional: Explicitly disconnect if needed, though pyjoycon often handles this
-        if joycon_right and hasattr(joycon_right, 'disconnect_device'):
-           Debug.info("Disconnecting Joy-Con...")
-           joycon_right.disconnect_device()
+        # Optional: Disconnect
+        # if joycon_right and hasattr(joycon_right, 'disconnect_device'):
+        #    Debug.info("Disconnecting Joy-Con...")
+        #    joycon_right.disconnect_device()
         Debug.info("Cleanup complete.")
     except Exception as e:
         Debug.error(f"Error during cleanup: {e}")
@@ -274,10 +302,16 @@ if __name__ == "__main__":
 
     if joycon_right:
         # test_right_joycon_rumble()
-        print_jc_info(joycon_right)
-        read_and_print_motion_data(joycon_right)
+        # print_jc_info(joycon_right)
+        read_and_print_calculated_motion(joycon_right)
+
+        # --- Optional: Uncomment to run tests or print info AFTER the main loop finishes ---
+        # print("\nSensor reading finished.")
+        # test_right_joycon_rumble()
+        # print_jc_info(joycon_right)
+        # --- End Optional ---
     else:
-        print("Right Joy-Con not initialized!!!")
+        print("Failed to initialize Right Joy-Con. Exiting.")
 
     # The script will wait in read_and_print_motion_data until Ctrl+C is pressed
     # or an error occurs. The cleanup function runs automatically upon exit.
