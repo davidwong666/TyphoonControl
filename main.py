@@ -12,10 +12,13 @@ joycon_right = None
 # Calculated from your example: sqrt(566^2 + (-383)^2 + (-4517)^2) ≈ 4568
 # TODO: Adjust this based on observation if needed.
 RESTING_ACCEL_MAGNITUDE = 4500
+RESTING_GYRO_MAGNITUDE = 20
+
 
 # How much acceleration magnitude *above resting* corresponds to full rumble intensity?
 # This requires tuning. Higher value means you need to shake harder for max rumble.
-MAX_MOTION_ACCEL_MAGNITUDE = 10000 # TODO: Example value, adjust as needed
+MAX_MOTION_ACCEL_MAGNITUDE = 40000
+MAX_MOTION_GYRO_MAGNITUDE = 15000
 
 # TODO: Rumble frequencies (can be adjusted for different feel)
 RUMBLE_LOW_FREQ = 80  # Hz
@@ -238,8 +241,8 @@ def test_right_joycon_rumble():
         traceback.print_exc()
         return False
 
-# --- Utility and Cleanup functions ---
 
+# --- Utility and Cleanup functions ---
 def cleanup():
     """Perform cleanup when exiting"""
     global joycon_right
@@ -271,26 +274,6 @@ def print_jc_info(joycon):
                         print(f"  - {attr}: {value}")
                 except:
                     print(f"  - {attr}: [Error accessing]")
-
-
-# def rumble_alert_pattern(joycon):
-#     """Provide an alert pattern - three short pulses"""
-#     for _ in range(3):
-#         provide_rumble_feedback(joycon, 0.8, 0.1)
-#         time.sleep(0.1)
-#
-#
-# def rumble_success_pattern(joycon):
-#     """Provide a success pattern - increasing intensity"""
-#     for i in range(5):
-#         intensity = (i + 1) / 5
-#         provide_rumble_feedback(joycon, intensity, 0.1)
-#         time.sleep(0.05)
-#
-#
-# def rumble_error_pattern(joycon):
-#     """Provide an error pattern - strong long pulse"""
-#     provide_rumble_feedback(joycon, 1.0, 0.7)
 
 
 if __name__ == "__main__":
