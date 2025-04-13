@@ -20,7 +20,7 @@ RESTING_ACCEL_MAGNITUDE = 4500  # Estimated magnitude of acceleration vector due
 MAX_MOTION_ACCEL_MAGNITUDE = 40000 # How much acceleration magnitude *above resting* corresponds to full rumble intensity?
 
 # -- Linger Settings --
-LINGER_DURATION = 0.7  # How many seconds the rumble should linger/decay after a strong burst (>= MAX_MOTION_GYRO_MAGNITUDE).
+LINGER_DURATION = 1.25  # How many seconds the rumble should linger/decay after a strong burst (>= MAX_MOTION_GYRO_MAGNITUDE).
 LINGER_START_INTENSITY = 1.0 # Intensity to start the linger decay from.
 
 # -- Rumble Feel Settings --
@@ -251,7 +251,9 @@ if __name__ == "__main__":
     if joycon_right:
         # Call the main refactored loop function
         rumble_loop(joycon_right)
-        print_jc_info(joycon_right)
+
+        # Uncomment to print detailed Joy-Con info
+        # print_jc_info(joycon_right)
     else:
         print("Failed to initialize Right Joy-Con. Exiting.")
     print("Script finished.")
