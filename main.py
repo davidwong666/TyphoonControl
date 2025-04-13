@@ -4,7 +4,7 @@ import math
 import sys
 import time
 import atexit
-from typing import Tuple, Dict, Optional
+from typing import Tuple, Dict, Optional, TypedDict, Callable
 
 joycon_right: Optional[RumbleJoyCon] = None # Type hint for clarity
 
@@ -13,15 +13,15 @@ joycon_right: Optional[RumbleJoyCon] = None # Type hint for clarity
 # -- Gyroscope Settings --
 # Resting gyro magnitude is low (~20), but we only want rumble for significant rotation.
 GYRO_RUMBLE_THRESHOLD = 5000  # Minimum gyro magnitude to START rumbling.
-MAX_MOTION_GYRO_MAGNITUDE = 20000 # Gyro magnitude that corresponds to MAXIMUM rumble intensity (1.0).
+MAX_MOTION_GYRO_MAGNITUDE = 30000 # Gyro magnitude that corresponds to MAXIMUM rumble intensity (1.0).
 
 # -- Accelerometer Settings (Not used for rumble calculation in this version, but kept for reference/printing) --
 RESTING_ACCEL_MAGNITUDE = 4500  # Estimated magnitude of acceleration vector due to gravity when at rest.
 MAX_MOTION_ACCEL_MAGNITUDE = 40000 # How much acceleration magnitude *above resting* corresponds to full rumble intensity?
 
 # -- Linger Settings --
-LINGER_DURATION = 1.25  # How many seconds the rumble should linger/decay after a strong burst (>= MAX_MOTION_GYRO_MAGNITUDE).
-LINGER_START_INTENSITY = 1.0 # Intensity to start the linger decay from.
+# This is now the *maximum* duration for a 1.0 intensity burst.
+MAX_LINGER_DURATION = 1.5 # Seconds
 
 # -- Rumble Feel Settings --
 RUMBLE_LOW_FREQ = 300  # Hz - Adjusted slightly for potentially different feel
@@ -29,14 +29,6 @@ RUMBLE_HIGH_FREQ = 800 # Hz - Adjusted slightly
 
 # -- Timing --
 LOOP_SLEEP_TIME = 0.05 # Update rate (20 Hz). Important for decay calculation.
-
-# --- Calculated Constants ---
-# How much intensity to decrease per loop iteration during decay
-# Avoid division by zero if duration is zero or negative
-if LINGER_DURATION > 0:
-    LINGER_DECAY_STEP = (LINGER_START_INTENSITY / LINGER_DURATION) * LOOP_SLEEP_TIME
-else:
-    LINGER_DECAY_STEP = LINGER_START_INTENSITY # Decay immediately if duration is invalid
 
 # --- End Constants ---
 
@@ -53,8 +45,24 @@ class Debug:
         if Debug.ENABLED: print(f"[INFO] {message}")
 
 
+# --- Type Definitions ---
+class SensorData(TypedDict):
+    ax: float; ay: float; az: float
+    gx: float; gy: float; gz: float
+    accel_mag: float
+    gyro_mag: float
+
+
+class LingerState(TypedDict):
+    active: bool             # Is a linger effect currently happening?
+    peak_intensity: float    # The intensity that triggered the current linger
+    initial_duration: float  # The total duration calculated for this specific linger
+    time_remaining: float    # How much time is left for the current linger
+
+
+# --- Initialization ---
 def initialize_right_joycon() -> Optional[RumbleJoyCon]:
-    """Initializes the right Joy-Con with rumble capabilities."""
+    """Initializes the right Joy-Con."""
     global joycon_right
     try:
         joycon_id_right = get_R_id()
@@ -65,15 +73,15 @@ def initialize_right_joycon() -> Optional[RumbleJoyCon]:
         joycon_right = RumbleJoyCon(*joycon_id_right)
         joycon_right.enable_vibration(True)
         time.sleep(0.1)
-        Debug.info("Right Joy-Con initialized for rumble.")
-        time.sleep(0.5)
+        Debug.info("Right Joy-Con initialized.")
+        time.sleep(0.5) # Allow connection to stabilize
         return joycon_right
     except Exception as e:
         Debug.error(f"Error initializing Right Joy-Con: {e}"); import traceback; traceback.print_exc()
         return None
 
-SensorData = Dict[str, float] # Type alias for sensor data dictionary
 
+# --- Core Calculation Functions ---
 def read_sensor_data(joycon: RumbleJoyCon) -> Optional[SensorData]:
     """Reads accelerometer and gyroscope data and calculates magnitudes."""
     try:
@@ -119,24 +127,58 @@ def calculate_target_intensity(gyro_magnitude: float) -> float:
     return clamp(intensity, 0.0, 1.0)
 
 
-def update_linger_state(gyro_magnitude: float, current_linger_intensity: float) -> float:
-    """Updates the lingering intensity based on current motion and decay."""
-    new_linger_intensity = current_linger_intensity # Start with the current value
+def calculate_decaying_intensity(state: LingerState) -> float:
+    """Calculates the current rumble intensity based on the linger state."""
+    if not state["active"] or state["initial_duration"] <= 0:
+        return 0.0 # Not lingering or invalid state
 
-    if gyro_magnitude >= MAX_MOTION_GYRO_MAGNITUDE:
-        # Trigger/reset linger
-        new_linger_intensity = LINGER_START_INTENSITY
-    elif current_linger_intensity > 0:
-        # Decay existing linger
-        new_linger_intensity -= LINGER_DECAY_STEP
-        new_linger_intensity = max(0.0, new_linger_intensity) # Ensure it doesn't go below zero
-
-    return new_linger_intensity
+    # Intensity decays linearly from peak_intensity to 0 over initial_duration
+    decay_factor = state["time_remaining"] / state["initial_duration"]
+    intensity = state["peak_intensity"] * decay_factor
+    return max(0.0, intensity) # Ensure non-negative
 
 
-def determine_final_intensity(target_intensity: float, linger_intensity: float) -> float:
-    """Determines the final rumble intensity by taking the max of target and linger."""
-    return max(target_intensity, linger_intensity)
+def update_linger_state(current_state: LingerState, target_intensity: float, delta_time: float) -> LingerState:
+    """Updates the lingering state based on current motion intensity and time elapsed."""
+    new_state = current_state.copy()
+
+    # Calculate the intensity the *current* linger would have *now* if it continued decaying
+    potential_decaying_intensity = calculate_decaying_intensity(current_state)
+
+    # --- Trigger/Reset Condition ---
+    # Start a new linger if:
+    # 1. The target intensity from current motion is positive AND
+    # 2. It's greater than the intensity the current linger would have decayed to.
+    if target_intensity > 0 and target_intensity >= potential_decaying_intensity:
+        new_state["active"] = True
+        new_state["peak_intensity"] = target_intensity
+        # Scale duration based on this burst's intensity
+        new_state["initial_duration"] = target_intensity * MAX_LINGER_DURATION
+        # Reset remaining time to the full duration for this new burst
+        new_state["time_remaining"] = new_state["initial_duration"]
+        # Debug.log(f"Linger Trigger/Reset: Peak={target_intensity:.2f}, InitDur={new_state['initial_duration']:.2f}")
+
+    # --- Decay Condition ---
+    # Otherwise, if a linger is already active, decay its remaining time
+    elif new_state["active"]:
+        new_state["time_remaining"] -= delta_time
+        if new_state["time_remaining"] <= 0:
+            # Linger has ended, reset the state
+            new_state["active"] = False
+            new_state["time_remaining"] = 0.0
+            new_state["peak_intensity"] = 0.0
+            new_state["initial_duration"] = 0.0
+            # Debug.log("Linger Ended")
+        # else:
+            # Debug.log(f"Lingering: Remain={new_state['time_remaining']:.2f}")
+
+    # If no new trigger and not active, state remains inactive
+    return new_state
+
+
+def determine_final_intensity(target_intensity: float, decaying_intensity: float) -> float:
+    """Determines the final rumble intensity by taking the max of target and decaying linger."""
+    return max(target_intensity, decaying_intensity)
 
 
 def send_rumble_command(joycon: RumbleJoyCon, intensity: float):
@@ -149,12 +191,14 @@ def send_rumble_command(joycon: RumbleJoyCon, intensity: float):
         Debug.error(f"Failed to generate or send rumble command: {e}")
 
 
-def print_status(sensor_data: SensorData, target_intensity: float, linger_intensity: float, final_intensity: float):
+def print_status(sensor_data: SensorData, target_intensity: float, current_decay_intensity: float, final_intensity: float, linger_state: LingerState):
     """Prints the current motion and rumble status to the console."""
-    print(f"\rGyrMag:{sensor_data.get('gyro_mag', 0.0): >6.1f} | "
-          f"TargetInt:{target_intensity: >4.2f} | "
-          f"LingerInt:{linger_intensity: >4.2f} | "
-          f"SentInt:{final_intensity: >4.2f}   ", end="")
+    linger_time_str = f"{linger_state['time_remaining']:.2f}s" if linger_state['active'] else " Off"
+    print(f"\rGyrMag:{sensor_data.get('gyro_mag', 0.0): >7.1f} | "
+          f"Target:{target_intensity: >4.2f} | "
+          f"Decay:{current_decay_intensity: >4.2f} | "
+          f"Sent:{final_intensity: >4.2f} | "
+          f"Linger:{linger_time_str}  ", end="")
     sys.stdout.flush()
 
 
@@ -173,6 +217,7 @@ def print_jc_info(joycon):
                     print(f"  - {attr}: [Error accessing]")
 
 
+# --- Main Loop and Cleanup ---
 def rumble_loop(joycon: RumbleJoyCon):
     """Main loop: reads sensors, calculates/updates rumble, prints status, and sleeps."""
     if not joycon:
@@ -180,18 +225,33 @@ def rumble_loop(joycon: RumbleJoyCon):
         return
 
     print("\n--- Reading Gyroscope & Applying Rumble w/ Linger (Refactored) (Press Ctrl+C to stop) ---")
-    print(f"Settings: GyroThr={GYRO_RUMBLE_THRESHOLD}, GyroMax={MAX_MOTION_GYRO_MAGNITUDE}, LingerDur={LINGER_DURATION:.2f}s")
+    print(f"Settings: GyroThr={GYRO_RUMBLE_THRESHOLD},"
+          f"GyroMax={MAX_MOTION_GYRO_MAGNITUDE},"
+          f"MaxLinger={MAX_LINGER_DURATION:.2f}s")
 
-    lingering_intensity = 0.0 # Initialize linger state
+    # Initialize linger state
+    linger_state: LingerState = {
+        "active": False,
+        "peak_intensity": 0.0,
+        "initial_duration": 0.0,
+        "time_remaining": 0.0,
+    }
 
     try:
+        last_time = time.monotonic()  # For calculating delta_time
+
         while True:
-            start_time = time.monotonic()
+            current_time = time.monotonic()
+            delta_time = current_time - last_time
+            last_time = current_time
+
+            # Ensure a minimum delta_time if loop runs extremely fast, avoid weird calculations
+            delta_time = max(0.001, delta_time)
 
             # 1. Read Sensors
             sensor_data = read_sensor_data(joycon)
             if sensor_data is None:
-                time.sleep(0.1) # Wait longer if sensor data is bad
+                time.sleep(0.05)  # Wait a bit if sensor data is bad
                 continue
 
             gyro_mag = sensor_data['gyro_mag']
@@ -199,22 +259,24 @@ def rumble_loop(joycon: RumbleJoyCon):
             # 2. Calculate Target Intensity (based on current motion)
             target_intensity = calculate_target_intensity(gyro_mag)
 
-            # 3. Update Linger State (handles trigger and decay)
-            lingering_intensity = update_linger_state(gyro_mag, lingering_intensity)
+            # 3. Update Linger State (handles trigger, reset, and decay)
+            linger_state = update_linger_state(linger_state, target_intensity, delta_time)
 
-            # 4. Determine Final Intensity
-            final_intensity = determine_final_intensity(target_intensity, lingering_intensity)
+            # 4. Calculate Current Decaying Intensity (based on updated state)
+            current_decaying_intensity = calculate_decaying_intensity(linger_state)
 
-            # 5. Send Rumble Command
+            # 5. Determine Final Intensity
+            final_intensity = determine_final_intensity(target_intensity, current_decaying_intensity)
+
+            # 6. Send Rumble Command
             send_rumble_command(joycon, final_intensity)
 
-            # 6. Print Status
-            print_status(sensor_data, target_intensity, lingering_intensity, final_intensity)
+            # 7. Print Status
+            print_status(sensor_data, target_intensity, current_decaying_intensity, final_intensity, linger_state)
 
-            # 7. Accurate Sleep
-            elapsed_time = time.monotonic() - start_time
-            # FIX: Use max(0.0, ...) to ensure float comparison
-            sleep_duration = max(0.0, LOOP_SLEEP_TIME - elapsed_time)
+            # 8. Accurate Sleep (using delta_time)
+            elapsed_since_loop_start = time.monotonic() - current_time  # Time spent in *this* iteration
+            sleep_duration = max(0.0, LOOP_SLEEP_TIME - elapsed_since_loop_start)
             time.sleep(sleep_duration)
 
     except KeyboardInterrupt:
@@ -223,8 +285,7 @@ def rumble_loop(joycon: RumbleJoyCon):
     finally:
         try:
             print("\nStopping final rumble...")
-            if joycon: # Ensure joycon object still exists
-                joycon.rumble_stop()
+            if joycon: joycon.rumble_stop()
         except Exception as e:
             Debug.error(f"Error stopping rumble on exit: {e}")
         print("\r" + " " * 120 + "\r", end="") # Clear the line
@@ -235,25 +296,101 @@ def cleanup():
     global joycon_right
     print("\nExiting script...")
     try:
-        # Ensure joycon is valid and has rumble_stop before calling
         if joycon_right and hasattr(joycon_right, 'rumble_stop') and callable(joycon_right.rumble_stop):
-            Debug.info("Ensuring Joy-Con rumble is stopped...")
+            Debug.info("Ensuring Joy-Con rumble is stopped (if active)...")
             joycon_right.rumble_stop()
         Debug.info("Cleanup complete.")
     except Exception as e:
         Debug.error(f"Error during cleanup: {e}")
 
 
+# --- Button Testing Function ---
+
+# Map button names to their getter methods on the JoyCon object
+# Using Callable[[JoyCon], bool] for type hint: a function that takes JoyCon and returns bool
+BUTTON_METHOD_MAP_RIGHT: Dict[str, Callable[[RumbleJoyCon], bool]] = {
+    "A": lambda jc: jc.get_button_a(),
+    "B": lambda jc: jc.get_button_b(),
+    "X": lambda jc: jc.get_button_x(),
+    "Y": lambda jc: jc.get_button_y(),
+    "R": lambda jc: jc.get_button_r(),
+    "ZR": lambda jc: jc.get_button_zr(),
+    "PLUS": lambda jc: jc.get_button_plus(),
+    "HOME": lambda jc: jc.get_button_home(),
+    "R_STICK": lambda jc: jc.get_button_r_stick(),
+    "SL": lambda jc: jc.get_button_right_sl(), # Side button
+    "SR": lambda jc: jc.get_button_right_sr(), # Side button
+    # Add others if needed (Capture is on Left JoyCon)
+}
+
+def test_buttons(joycon: RumbleJoyCon):
+    """Continuously monitors and prints the name of pressed buttons."""
+    if not joycon:
+        Debug.error("Invalid JoyCon object passed to test_buttons.")
+        return
+
+    print("\n--- Testing Right Joy-Con Buttons (Press Ctrl+C to stop) ---")
+    print("Press any button on the right Joy-Con...")
+
+    previous_button_states: Dict[str, bool] = {name: False for name in BUTTON_METHOD_MAP_RIGHT}
+
+    try:
+        while True:
+            current_button_states: Dict[str, bool] = {}
+            something_pressed_this_cycle = False
+
+            # Read current state of all buttons
+            for name, getter_method in BUTTON_METHOD_MAP_RIGHT.items():
+                try:
+                    is_pressed = getter_method(joycon)
+                    current_button_states[name] = is_pressed
+
+                    # Check for a press event (state changed from False to True)
+                    if is_pressed and not previous_button_states.get(name, False):
+                        print(f"[BUTTON PRESS] {name}")
+                        something_pressed_this_cycle = True
+
+                except AttributeError:
+                    Debug.error(f"\nError accessing button {name}. Joy-Con likely disconnected.")
+                    time.sleep(1) # Pause if disconnected
+                    # Optionally break or attempt reconnect here
+                    continue # Skip to next button or next loop iteration
+                except Exception as e:
+                    Debug.error(f"\nUnexpected error reading button {name}: {e}")
+                    time.sleep(0.5)
+                    continue
+
+            # Update previous state for the next iteration
+            previous_button_states = current_button_states.copy()
+
+            # Add a small delay to prevent high CPU usage
+            time.sleep(0.03) # Check frequently for responsiveness
+
+    except KeyboardInterrupt:
+        print("\nStopping button testing.")
+    finally:
+        print("Button testing finished.")
+        # No specific cleanup needed here unless resetting player LEDs etc.
+
+
 if __name__ == "__main__":
     atexit.register(cleanup)
     print("Initializing Right Joy-Con...")
     joycon_right = initialize_right_joycon()
+
     if joycon_right:
-        # Call the main refactored loop function
-        rumble_loop(joycon_right)
+        # --- Call the button testing function ---
+        test_buttons(joycon_right)
+        # --- END button testing ---
+
+        # --- Rumble loop (commented out for now) ---
+        # print("\nButton test finished. Starting rumble loop...")
+        # rumble_loop(joycon_right)
+        # --- END rumble loop ---
 
         # Uncomment to print detailed Joy-Con info
         # print_jc_info(joycon_right)
     else:
         print("Failed to initialize Right Joy-Con. Exiting.")
+
     print("Script finished.")
