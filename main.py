@@ -1,5 +1,3 @@
-# --- START OF FILE main.py ---
-
 from pyjoycon import get_R_id
 from joycon_rumble import RumbleJoyCon, RumbleData, clamp
 import math
@@ -731,5 +729,3 @@ if __name__ == "__main__":
 
     # Script execution finished (either normally or after simulation/cancellation)
     print("Script finished.")
-
-# --- END OF FILE main.py ---
