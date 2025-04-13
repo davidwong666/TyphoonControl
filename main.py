@@ -12,7 +12,7 @@ joycon_right: Optional[RumbleJoyCon] = None # Type hint for clarity
 
 # -- Gyroscope Settings --
 # Resting gyro magnitude is low (~20), but we only want rumble for significant rotation.
-GYRO_RUMBLE_THRESHOLD = 5000  # Minimum gyro magnitude to START rumbling.
+GYRO_RUMBLE_THRESHOLD = 8000  # Minimum gyro magnitude to START rumbling.
 MAX_MOTION_GYRO_MAGNITUDE = 30000 # Gyro magnitude that corresponds to MAXIMUM rumble intensity (1.0).
 
 # -- Accelerometer Settings (Not used for rumble calculation in this version, but kept for reference/printing) --
@@ -44,7 +44,6 @@ class Debug:
     def info(message):
         if Debug.ENABLED: print(f"[INFO] {message}")
 
-
 # --- Type Definitions ---
 class SensorData(TypedDict):
     ax: float; ay: float; az: float
@@ -52,13 +51,11 @@ class SensorData(TypedDict):
     accel_mag: float
     gyro_mag: float
 
-
 class LingerState(TypedDict):
     active: bool             # Is a linger effect currently happening?
     peak_intensity: float    # The intensity that triggered the current linger
     initial_duration: float  # The total duration calculated for this specific linger
     time_remaining: float    # How much time is left for the current linger
-
 
 # --- Initialization ---
 def initialize_right_joycon() -> Optional[RumbleJoyCon]:
@@ -80,6 +77,92 @@ def initialize_right_joycon() -> Optional[RumbleJoyCon]:
         Debug.error(f"Error initializing Right Joy-Con: {e}"); import traceback; traceback.print_exc()
         return None
 
+# --- Button Mapping ---
+BUTTON_METHOD_MAP_RIGHT: Dict[str, Callable[[RumbleJoyCon], bool]] = {
+    "A": lambda jc: jc.get_button_a(),
+    "B": lambda jc: jc.get_button_b(),
+    "X": lambda jc: jc.get_button_x(),
+    "Y": lambda jc: jc.get_button_y(),
+    "R": lambda jc: jc.get_button_r(),
+    "ZR": lambda jc: jc.get_button_zr(),
+    "PLUS": lambda jc: jc.get_button_plus(),
+    "HOME": lambda jc: jc.get_button_home(),
+    "R_STICK": lambda jc: jc.get_button_r_stick(),
+    "SL": lambda jc: jc.get_button_right_sl(),
+    "SR": lambda jc: jc.get_button_right_sr(),
+}
+
+# --- Button Detection Function ---
+def wait_for_button_press(joycon: RumbleJoyCon, target_button: str) -> bool:
+    """
+    Monitors buttons until the target_button is pressed.
+    Returns True if the target button was pressed, False otherwise (e.g., Ctrl+C).
+    """
+    if not joycon:
+        Debug.error("Invalid JoyCon object passed to wait_for_button_press.")
+        return False
+    if target_button not in BUTTON_METHOD_MAP_RIGHT:
+        Debug.error(f"Target button '{target_button}' not defined in BUTTON_METHOD_MAP_RIGHT.")
+        return False
+
+    print(f"\n--- Waiting for '{target_button}' press (Press Ctrl+C to cancel) ---")
+    print(f"Press the '{target_button}' button on the right Joy-Con to start the rumble sequence...")
+
+    previous_button_states: Dict[str, bool] = {name: False for name in BUTTON_METHOD_MAP_RIGHT}
+    target_getter = BUTTON_METHOD_MAP_RIGHT[target_button]
+
+    try:
+        while True:
+            target_pressed = False
+            try:
+                # Check the target button first for efficiency
+                is_pressed_now = target_getter(joycon)
+                if is_pressed_now and not previous_button_states.get(target_button, False):
+                    print(f"\n[BUTTON PRESS] {target_button} detected!")
+                    target_pressed = True
+                    # Update state immediately so we don't re-trigger on next check if loop is fast
+                    previous_button_states[target_button] = True
+                    return True # Exit the loop and function successfully
+
+                # Optional: Check and print other buttons without exiting
+                # for name, getter_method in BUTTON_METHOD_MAP_RIGHT.items():
+                #     if name == target_button: continue # Already checked
+                #     state_now = getter_method(joycon)
+                #     if state_now and not previous_button_states.get(name, False):
+                #          print(f"({name} pressed)") # Indicate other presses
+                #     previous_button_states[name] = state_now # Update state
+
+                # Necessary: Update state for the target button if it wasn't pressed or was released
+                previous_button_states[target_button] = is_pressed_now
+
+            except AttributeError:
+                Debug.error("\nError accessing button state. Joy-Con likely disconnected.")
+                time.sleep(1); return False # Exit if disconnected
+            except Exception as e:
+                Debug.error(f"\nUnexpected error reading button state: {e}")
+                time.sleep(0.5); continue # Try again
+
+            time.sleep(0.03) # Check frequently
+
+    except KeyboardInterrupt:
+        print("\nButton waiting cancelled by user.")
+        return False # Indicate cancellation
+    finally:
+        print("--- Button waiting finished. ---")
+
+# --- Countdown Function ---
+def perform_countdown():
+    """Prints a 3-2-1-Start countdown to the console."""
+    print("Starting in...")
+    time.sleep(0.5)
+    print("3", flush=True)
+    time.sleep(1)
+    print("2", flush=True)
+    time.sleep(1)
+    print("1", flush=True)
+    time.sleep(1)
+    print("Start!", flush=True)
+    time.sleep(0.2) # Short pause after start
 
 # --- Core Calculation Functions ---
 def read_sensor_data(joycon: RumbleJoyCon) -> Optional[SensorData]:
@@ -114,7 +197,6 @@ def read_sensor_data(joycon: RumbleJoyCon) -> Optional[SensorData]:
         import traceback; traceback.print_exc()
         return None
 
-
 def calculate_target_intensity(gyro_magnitude: float) -> float:
     """Calculates rumble intensity based *only* on current gyroscope magnitude."""
     if gyro_magnitude < GYRO_RUMBLE_THRESHOLD:
@@ -126,7 +208,6 @@ def calculate_target_intensity(gyro_magnitude: float) -> float:
     intensity = value_in_range / active_range_size
     return clamp(intensity, 0.0, 1.0)
 
-
 def calculate_decaying_intensity(state: LingerState) -> float:
     """Calculates the current rumble intensity based on the linger state."""
     if not state["active"] or state["initial_duration"] <= 0:
@@ -136,7 +217,6 @@ def calculate_decaying_intensity(state: LingerState) -> float:
     decay_factor = state["time_remaining"] / state["initial_duration"]
     intensity = state["peak_intensity"] * decay_factor
     return max(0.0, intensity) # Ensure non-negative
-
 
 def update_linger_state(current_state: LingerState, target_intensity: float, delta_time: float) -> LingerState:
     """Updates the lingering state based on current motion intensity and time elapsed."""
@@ -175,11 +255,9 @@ def update_linger_state(current_state: LingerState, target_intensity: float, del
     # If no new trigger and not active, state remains inactive
     return new_state
 
-
 def determine_final_intensity(target_intensity: float, decaying_intensity: float) -> float:
     """Determines the final rumble intensity by taking the max of target and decaying linger."""
     return max(target_intensity, decaying_intensity)
-
 
 def send_rumble_command(joycon: RumbleJoyCon, intensity: float):
     """Generates rumble data and sends the command to the Joy-Con."""
@@ -190,7 +268,6 @@ def send_rumble_command(joycon: RumbleJoyCon, intensity: float):
     except Exception as e:
         Debug.error(f"Failed to generate or send rumble command: {e}")
 
-
 def print_status(sensor_data: SensorData, target_intensity: float, current_decay_intensity: float, final_intensity: float, linger_state: LingerState):
     """Prints the current motion and rumble status to the console."""
     linger_time_str = f"{linger_state['time_remaining']:.2f}s" if linger_state['active'] else " Off"
@@ -200,7 +277,6 @@ def print_status(sensor_data: SensorData, target_intensity: float, current_decay
           f"Sent:{final_intensity: >4.2f} | "
           f"Linger:{linger_time_str}  ", end="")
     sys.stdout.flush()
-
 
 def print_jc_info(joycon):
     if joycon:
@@ -216,7 +292,6 @@ def print_jc_info(joycon):
                 except:
                     print(f"  - {attr}: [Error accessing]")
 
-
 # --- Main Loop and Cleanup ---
 def rumble_loop(joycon: RumbleJoyCon):
     """Main loop: reads sensors, calculates/updates rumble, prints status, and sleeps."""
@@ -224,17 +299,23 @@ def rumble_loop(joycon: RumbleJoyCon):
         Debug.error("Invalid JoyCon object passed to rumble_loop.")
         return
 
+    # Ensure vibration is enabled before starting rumble loop
+    try:
+        joycon.enable_vibration(True)
+        Debug.info("Vibration enabled for rumble loop.")
+    except Exception as e:
+        Debug.error(f"Failed to enable vibration before rumble loop: {e}")
+        # Continue anyway, _send_rumble might still work
+
     print("\n--- Reading Gyroscope & Applying Rumble w/ Linger (Refactored) (Press Ctrl+C to stop) ---")
-    print(f"Settings: GyroThr={GYRO_RUMBLE_THRESHOLD},"
-          f"GyroMax={MAX_MOTION_GYRO_MAGNITUDE},"
-          f"MaxLinger={MAX_LINGER_DURATION:.2f}s")
+    print(f"Settings: GyroThr={GYRO_RUMBLE_THRESHOLD}, GyroMax={MAX_MOTION_GYRO_MAGNITUDE}, MaxLinger={MAX_LINGER_DURATION:.2f}s")
 
     # Initialize linger state
     linger_state: LingerState = {
         "active": False,
         "peak_intensity": 0.0,
         "initial_duration": 0.0,
-        "time_remaining": 0.0,
+        "time_remaining": 0.0
     }
 
     try:
@@ -242,46 +323,22 @@ def rumble_loop(joycon: RumbleJoyCon):
 
         while True:
             current_time = time.monotonic()
-            delta_time = current_time - last_time
+            delta_time = max(0.001, current_time - last_time)
             last_time = current_time
-
-            # Ensure a minimum delta_time if loop runs extremely fast, avoid weird calculations
-            delta_time = max(0.001, delta_time)
-
-            # 1. Read Sensors
             sensor_data = read_sensor_data(joycon)
-            if sensor_data is None:
-                time.sleep(0.05)  # Wait a bit if sensor data is bad
-                continue
-
+            if sensor_data is None: time.sleep(0.05); continue
             gyro_mag = sensor_data['gyro_mag']
-
-            # 2. Calculate Target Intensity (based on current motion)
             target_intensity = calculate_target_intensity(gyro_mag)
-
-            # 3. Update Linger State (handles trigger, reset, and decay)
             linger_state = update_linger_state(linger_state, target_intensity, delta_time)
-
-            # 4. Calculate Current Decaying Intensity (based on updated state)
             current_decaying_intensity = calculate_decaying_intensity(linger_state)
-
-            # 5. Determine Final Intensity
             final_intensity = determine_final_intensity(target_intensity, current_decaying_intensity)
-
-            # 6. Send Rumble Command
             send_rumble_command(joycon, final_intensity)
-
-            # 7. Print Status
             print_status(sensor_data, target_intensity, current_decaying_intensity, final_intensity, linger_state)
-
-            # 8. Accurate Sleep (using delta_time)
-            elapsed_since_loop_start = time.monotonic() - current_time  # Time spent in *this* iteration
+            elapsed_since_loop_start = time.monotonic() - current_time
             sleep_duration = max(0.0, LOOP_SLEEP_TIME - elapsed_since_loop_start)
             time.sleep(sleep_duration)
-
     except KeyboardInterrupt:
         print("\nStopping data reading and rumble.")
-    # No need for explicit exception handling here if component functions handle theirs
     finally:
         try:
             print("\nStopping final rumble...")
@@ -290,107 +347,38 @@ def rumble_loop(joycon: RumbleJoyCon):
             Debug.error(f"Error stopping rumble on exit: {e}")
         print("\r" + " " * 120 + "\r", end="") # Clear the line
 
-
 def cleanup():
     """Perform cleanup when exiting"""
     global joycon_right
     print("\nExiting script...")
     try:
         if joycon_right and hasattr(joycon_right, 'rumble_stop') and callable(joycon_right.rumble_stop):
-            Debug.info("Ensuring Joy-Con rumble is stopped (if active)...")
+            Debug.info("Ensuring Joy-Con rumble is stopped...")
             joycon_right.rumble_stop()
         Debug.info("Cleanup complete.")
     except Exception as e:
         Debug.error(f"Error during cleanup: {e}")
 
-
-# --- Button Testing Function ---
-
-# Map button names to their getter methods on the JoyCon object
-# Using Callable[[JoyCon], bool] for type hint: a function that takes JoyCon and returns bool
-BUTTON_METHOD_MAP_RIGHT: Dict[str, Callable[[RumbleJoyCon], bool]] = {
-    "A": lambda jc: jc.get_button_a(),
-    "B": lambda jc: jc.get_button_b(),
-    "X": lambda jc: jc.get_button_x(),
-    "Y": lambda jc: jc.get_button_y(),
-    "R": lambda jc: jc.get_button_r(),
-    "ZR": lambda jc: jc.get_button_zr(),
-    "PLUS": lambda jc: jc.get_button_plus(),
-    "HOME": lambda jc: jc.get_button_home(),
-    "R_STICK": lambda jc: jc.get_button_r_stick(),
-    "SL": lambda jc: jc.get_button_right_sl(), # Side button
-    "SR": lambda jc: jc.get_button_right_sr(), # Side button
-    # Add others if needed (Capture is on Left JoyCon)
-}
-
-def test_buttons(joycon: RumbleJoyCon):
-    """Continuously monitors and prints the name of pressed buttons."""
-    if not joycon:
-        Debug.error("Invalid JoyCon object passed to test_buttons.")
-        return
-
-    print("\n--- Testing Right Joy-Con Buttons (Press Ctrl+C to stop) ---")
-    print("Press any button on the right Joy-Con...")
-
-    previous_button_states: Dict[str, bool] = {name: False for name in BUTTON_METHOD_MAP_RIGHT}
-
-    try:
-        while True:
-            current_button_states: Dict[str, bool] = {}
-            something_pressed_this_cycle = False
-
-            # Read current state of all buttons
-            for name, getter_method in BUTTON_METHOD_MAP_RIGHT.items():
-                try:
-                    is_pressed = getter_method(joycon)
-                    current_button_states[name] = is_pressed
-
-                    # Check for a press event (state changed from False to True)
-                    if is_pressed and not previous_button_states.get(name, False):
-                        print(f"[BUTTON PRESS] {name}")
-                        something_pressed_this_cycle = True
-
-                except AttributeError:
-                    Debug.error(f"\nError accessing button {name}. Joy-Con likely disconnected.")
-                    time.sleep(1) # Pause if disconnected
-                    # Optionally break or attempt reconnect here
-                    continue # Skip to next button or next loop iteration
-                except Exception as e:
-                    Debug.error(f"\nUnexpected error reading button {name}: {e}")
-                    time.sleep(0.5)
-                    continue
-
-            # Update previous state for the next iteration
-            previous_button_states = current_button_states.copy()
-
-            # Add a small delay to prevent high CPU usage
-            time.sleep(0.03) # Check frequently for responsiveness
-
-    except KeyboardInterrupt:
-        print("\nStopping button testing.")
-    finally:
-        print("Button testing finished.")
-        # No specific cleanup needed here unless resetting player LEDs etc.
-
-
+# Main entry point
 if __name__ == "__main__":
     atexit.register(cleanup)
     print("Initializing Right Joy-Con...")
     joycon_right = initialize_right_joycon()
 
-    if joycon_right:
-        # --- Call the button testing function ---
-        test_buttons(joycon_right)
-        # --- END button testing ---
-
-        # --- Rumble loop (commented out for now) ---
-        # print("\nButton test finished. Starting rumble loop...")
-        # rumble_loop(joycon_right)
-        # --- END rumble loop ---
-
-        # Uncomment to print detailed Joy-Con info
-        # print_jc_info(joycon_right)
-    else:
+    if not joycon_right:
         print("Failed to initialize Right Joy-Con. Exiting.")
+
+    # 1. Wait for 'A' button press
+    start_signal_received = wait_for_button_press(joycon_right, target_button="A")
+
+    # 2. If 'A' was pressed, perform countdown and start rumble loop
+    if start_signal_received:
+        perform_countdown()
+        rumble_loop(joycon_right)
+    else:
+        print("\nStart signal not received (cancelled or error). Exiting.")
+
+    # Uncomment to print detailed Joy-Con info
+    print_jc_info(joycon_right)
 
     print("Script finished.")
