@@ -56,6 +56,12 @@ TYPHOON_THRESHOLDS = {
 # Sort thresholds for easier lookup
 _SORTED_THRESHOLDS = sorted(TYPHOON_THRESHOLDS.items(), key=lambda item: item[1]) # <-- Updated based on new thresholds
 
+# --- Create Level Mapping (After sorting) ---
+# Level 0: Calm, Levels 1-6 based on sorted thresholds
+_NUM_TYPHOON_LEVELS = len(_SORTED_THRESHOLDS) + 1 # +1 for Calm
+_NAME_TO_LEVEL_MAP = {name: i + 1 for i, (name, _) in enumerate(_SORTED_THRESHOLDS)}
+_NAME_TO_LEVEL_MAP["無風 (Calm)"] = 0 # Assign level 0 to Calm
+
 # --- End Constants ---
 
 class Debug:
@@ -381,19 +387,32 @@ def update_energy_level(current_energy: float, target_gyro_mag: float, average_g
     return clamp(next_energy, 0.0, MAX_MOTION_GYRO_MAGNITUDE)
 
 def get_typhoon_classification(magnitude: float) -> str:
-    """Returns the typhoon classification based on magnitude."""
-    # Uses the recalculated _SORTED_THRESHOLDS
-    if magnitude <= 0:
-        return "無風 (Calm)"
-    for name, threshold in _SORTED_THRESHOLDS:
-        if magnitude <= threshold:
-            return name
-    # If magnitude is above the highest threshold (Super Typhoon)
-    return _SORTED_THRESHOLDS[-1][0]
+    """
+    Returns the typhoon classification string including its level (e.g., "Level 3/7: ...").
+    Level 0 is Calm, Levels 1-6 correspond to the thresholds.
+    """
+    classification_name = "無風 (Calm)" # Default to Calm
+
+    if magnitude > 0:
+        # Find the appropriate category name
+        found_category = False
+        for name, threshold in _SORTED_THRESHOLDS:
+            if magnitude <= threshold:
+                classification_name = name
+                found_category = True
+                break
+        # If magnitude is above the highest threshold
+        if not found_category:
+             classification_name = _SORTED_THRESHOLDS[-1][0] # Assign highest category name
+
+    # Get the level for the determined name
+    level = _NAME_TO_LEVEL_MAP.get(classification_name, 0) # Default to 0 if name not found (shouldn't happen)
+
+    # Format the final string
+    return f"Level {level}/{_NUM_TYPHOON_LEVELS - 1}: {classification_name}"
 
 def display_energy_bar(energy: float, max_energy: float, width: int = 30) -> str:
-    """Creates a simple text-based energy bar string."""
-    # The max_energy argument will be MAX_MOTION_GYRO_MAGNITUDE, which is updated
+    # (Function remains the same)
     if max_energy <= 0: return "[ ]"
     fill_level = clamp(energy / max_energy, 0.0, 1.0)
     filled_width = int(fill_level * width)
@@ -447,15 +466,17 @@ def simulation_loop(joycon: RumbleJoyCon):
             update_gyro_history(gyro_history, current_time, gyro_mag)
             average_gyro_10s = calculate_average_gyro(gyro_history)
             current_energy = update_energy_level(current_energy, gyro_mag, average_gyro_10s, delta_time)
-            current_classification = get_typhoon_classification(current_energy)
+            # get_typhoon_classification now returns the formatted string
+            current_classification_str = get_typhoon_classification(current_energy)
             energy_bar_str = display_energy_bar(current_energy, MAX_MOTION_GYRO_MAGNITUDE)
 
             # --- Printing Status ---
             time_elapsed = current_time - loop_start_time
+            # Print uses the directly returned formatted classification string
             print(f"\rTime: {time_elapsed: >4.1f}s | Gyro Now:{gyro_mag: >7.1f} Avg:{average_gyro_10s: >7.1f} | "
                   f"Energy:{current_energy: >7.1f} {energy_bar_str} | "
-                  f"Rumble:{final_rumble_intensity: >4.2f} | {current_classification}        ",
-                  end="")  # Added spaces to clear line
+                  f"Rumble:{final_rumble_intensity: >4.2f} | {current_classification_str}        ",
+                  end="")  # Use formatted string
             sys.stdout.flush()
 
             # --- Accurate Sleep ---
@@ -469,8 +490,9 @@ def simulation_loop(joycon: RumbleJoyCon):
         # --- Final Output ---
         print("\n--- Final Results ---")
         print(f"Average Gyro Magnitude over last {ENERGY_HISTORY_DURATION_S:.1f}s (or less): {final_average_gyro:.1f}")
-        final_classification = get_typhoon_classification(final_average_gyro)
-        print(f"Final Estimated Strength: {final_classification}")
+        # get_typhoon_classification now returns the formatted string
+        final_classification_str = get_typhoon_classification(final_average_gyro)
+        print(f"Final Estimated Strength: {final_classification_str}")  # Use formatted string
 
         # Stop rumble
         try:
