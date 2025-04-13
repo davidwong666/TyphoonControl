@@ -1,4 +1,4 @@
-from pyjoycon import get_R_id, get_L_id
+from pyjoycon import get_R_id
 from joycon_rumble import RumbleJoyCon, RumbleData, clamp
 import math
 import sys
@@ -16,16 +16,24 @@ GYRO_RUMBLE_THRESHOLD = 8000  # Minimum gyro magnitude to START rumbling.
 MAX_MOTION_GYRO_MAGNITUDE = 30000 # Gyro magnitude that corresponds to MAXIMUM rumble intensity (1.0).
 
 # -- Accelerometer Settings (Not used for rumble calculation in this version, but kept for reference/printing) --
-RESTING_ACCEL_MAGNITUDE = 4500  # Estimated magnitude of acceleration vector due to gravity when at rest.
-MAX_MOTION_ACCEL_MAGNITUDE = 40000 # How much acceleration magnitude *above resting* corresponds to full rumble intensity?
+# RESTING_ACCEL_MAGNITUDE = 4500  # Estimated magnitude of acceleration vector due to gravity when at rest.
+# MAX_MOTION_ACCEL_MAGNITUDE = 40000 # How much acceleration magnitude *above resting* corresponds to full rumble intensity?
 
 # -- Linger Settings --
 # This is now the *maximum* duration for a 1.0 intensity burst.
 MAX_LINGER_DURATION = 1.5 # Seconds
 
-# -- Rumble Feel Settings --
+# -- Rumble Feel Settings (Main Loop) --
 RUMBLE_LOW_FREQ = 300  # Hz - Adjusted slightly for potentially different feel
 RUMBLE_HIGH_FREQ = 800 # Hz - Adjusted slightly
+
+# -- Countdown Rumble Settings --
+COUNTDOWN_BASE_FREQ_HZ = 90
+COUNTDOWN_FREQ_STEP_HZ = 30
+COUNTDOWN_BASE_INTENSITY = 0.3
+COUNTDOWN_INTENSITY_STEP = 0.1
+COUNTDOWN_PULSE_DURATION_S = 0.15
+COUNTDOWN_START_PULSE_DURATION_S = 0.2
 
 # -- Timing --
 LOOP_SLEEP_TIME = 0.05 # Update rate (20 Hz). Important for decay calculation.
@@ -68,10 +76,15 @@ def initialize_right_joycon() -> Optional[RumbleJoyCon]:
             return None
         Debug.info(f"Found Right Joy-Con: vendor_id={joycon_id_right[0]}, product_id={joycon_id_right[1]}, serial={joycon_id_right[2]}")
         joycon_right = RumbleJoyCon(*joycon_id_right)
-        joycon_right.enable_vibration(True)
-        time.sleep(0.1)
+        # Enable vibration early - needed for countdown and main loop
+        try:
+            joycon_right.enable_vibration(True)
+            time.sleep(0.1)  # Short delay after enabling
+            Debug.info("Vibration enabled.")
+        except Exception as vib_e:
+            Debug.error(f"Failed to enable vibration during init: {vib_e}")
         Debug.info("Right Joy-Con initialized.")
-        time.sleep(0.5) # Allow connection to stabilize
+        time.sleep(0.5)  # Allow connection to stabilize
         return joycon_right
     except Exception as e:
         Debug.error(f"Error initializing Right Joy-Con: {e}"); import traceback; traceback.print_exc()
@@ -113,7 +126,6 @@ def wait_for_button_press(joycon: RumbleJoyCon, target_button: str) -> bool:
 
     try:
         while True:
-            target_pressed = False
             try:
                 # Check the target button first for efficiency
                 is_pressed_now = target_getter(joycon)
@@ -150,19 +162,61 @@ def wait_for_button_press(joycon: RumbleJoyCon, target_button: str) -> bool:
     finally:
         print("--- Button waiting finished. ---")
 
+# --- Rumble Pulse Function ---
+def rumble_pulse(joycon: RumbleJoyCon, low_freq: float, high_freq: float, intensity: float, duration: float):
+    """Sends a short, fixed rumble pulse and then stops."""
+    if not joycon: return
+    try:
+        # Clamp inputs for safety
+        low_freq = clamp(low_freq, 41, 626)
+        high_freq = clamp(high_freq, 82, 1253)
+        intensity = clamp(intensity, 0.0, 1.0)
+        duration = max(0.01, duration) # Ensure minimum duration
+
+        rumble_data_gen = RumbleData(low_freq, high_freq, intensity)
+        rumble_bytes = rumble_data_gen.GetData()
+        joycon._send_rumble(rumble_bytes)
+        time.sleep(duration)
+        joycon.rumble_stop()
+    except Exception as e:
+        Debug.error(f"Error during rumble pulse: {e}")
+        # Ensure rumble stops even if error occurs mid-pulse
+        try:
+            if joycon: joycon.rumble_stop()
+        except: pass
+
 # --- Countdown Function ---
-def perform_countdown():
-    """Prints a 3-2-1-Start countdown to the console."""
-    print("Starting in...")
-    time.sleep(0.5)
-    print("3", flush=True)
-    time.sleep(1)
-    print("2", flush=True)
-    time.sleep(1)
-    print("1", flush=True)
-    time.sleep(1)
-    print("Start!", flush=True)
-    time.sleep(0.2) # Short pause after start
+def perform_countdown_with_rumble(joycon: RumbleJoyCon):
+    """Prints a 3-2-1-Start countdown with corresponding rumble pulses."""
+    if not joycon:
+        Debug.error("Cannot perform countdown: invalid JoyCon object.")
+        return
+
+    print("\nStarting in...")
+    time.sleep(0.5) # Initial pause
+
+    countdown_steps = [
+        ("3", COUNTDOWN_BASE_FREQ_HZ + 0 * COUNTDOWN_FREQ_STEP_HZ, COUNTDOWN_BASE_INTENSITY + 0 * COUNTDOWN_INTENSITY_STEP, COUNTDOWN_PULSE_DURATION_S),
+        ("2", COUNTDOWN_BASE_FREQ_HZ + 1 * COUNTDOWN_FREQ_STEP_HZ, COUNTDOWN_BASE_INTENSITY + 1 * COUNTDOWN_INTENSITY_STEP, COUNTDOWN_PULSE_DURATION_S),
+        ("1", COUNTDOWN_BASE_FREQ_HZ + 2 * COUNTDOWN_FREQ_STEP_HZ, COUNTDOWN_BASE_INTENSITY + 2 * COUNTDOWN_INTENSITY_STEP, COUNTDOWN_PULSE_DURATION_S),
+    ]
+    start_step = ("Start!", COUNTDOWN_BASE_FREQ_HZ + 3 * COUNTDOWN_FREQ_STEP_HZ, COUNTDOWN_BASE_INTENSITY + 3 * COUNTDOWN_INTENSITY_STEP, COUNTDOWN_START_PULSE_DURATION_S)
+
+    # Do the 3, 2, 1 steps
+    for text, hf, intensity, duration in countdown_steps:
+        # Low frequency can be derived or fixed, let's derive (e.g., ~0.6 * hf)
+        lf = max(41.0, hf * 0.6) # Ensure low freq is within valid range
+        rumble_pulse(joycon, lf, hf, intensity, duration)
+        print(text, flush=True)
+        # Pause *after* printing, accounting for rumble time
+        time.sleep(max(0.0, 1.0 - duration)) # Wait roughly 1 second total per step
+
+    # Do the "Start!" step
+    lf_start = max(41.0, start_step[1] * 0.6)
+    rumble_pulse(joycon, lf_start, start_step[1], start_step[2], start_step[3])
+    print(start_step[0], flush=True)
+    # Shorter pause after start before main loop begins
+    time.sleep(max(0.0, 0.2 - start_step[3]))
 
 # --- Core Calculation Functions ---
 def read_sensor_data(joycon: RumbleJoyCon) -> Optional[SensorData]:
@@ -305,7 +359,7 @@ def rumble_loop(joycon: RumbleJoyCon):
         Debug.info("Vibration enabled for rumble loop.")
     except Exception as e:
         Debug.error(f"Failed to enable vibration before rumble loop: {e}")
-        # Continue anyway, _send_rumble might still work
+        pass # Continue anyway, _send_rumble might still work
 
     print("\n--- Reading Gyroscope & Applying Rumble w/ Linger (Refactored) (Press Ctrl+C to stop) ---")
     print(f"Settings: GyroThr={GYRO_RUMBLE_THRESHOLD}, GyroMax={MAX_MOTION_GYRO_MAGNITUDE}, MaxLinger={MAX_LINGER_DURATION:.2f}s")
@@ -320,7 +374,6 @@ def rumble_loop(joycon: RumbleJoyCon):
 
     try:
         last_time = time.monotonic()  # For calculating delta_time
-
         while True:
             current_time = time.monotonic()
             delta_time = max(0.001, current_time - last_time)
@@ -373,7 +426,7 @@ if __name__ == "__main__":
 
     # 2. If 'A' was pressed, perform countdown and start rumble loop
     if start_signal_received:
-        perform_countdown()
+        perform_countdown_with_rumble(joycon_right)
         rumble_loop(joycon_right)
     else:
         print("\nStart signal not received (cancelled or error). Exiting.")
