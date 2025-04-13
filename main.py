@@ -617,57 +617,47 @@ def simulation_loop(joycon: RumbleJoyCon):
             delta_time = max(0.001, current_time - last_time) # Ensure dt is positive
             last_time = current_time # Update last_time for the next iteration
 
-            # Check if the total simulation duration has been reached
-            if current_time - loop_start_time >= SIMULATION_DURATION_S:
+            # --- Check simulation end time ---
+            time_elapsed = current_time - loop_start_time  # Calculate elapsed time first
+            if time_elapsed >= SIMULATION_DURATION_S:
                 print("\n--- Simulation Time Ended ---")
-                # Calculate the final average before exiting
                 final_average_gyro = calculate_average_gyro(gyro_history)
-                break # Exit the while loop
+                break  # Exit the main loop
 
-            # 1. Read Sensor Data
+            # --- Calculate remaining time for display ---
+            # Ensure it doesn't display negative time if loop runs slightly over
+            time_remaining = max(0.0, SIMULATION_DURATION_S - time_elapsed)
+
+            # --- Sensor Reading ---
             sensor_data = read_sensor_data(joycon)
-            # If sensor reading failed, skip the rest of this iteration and wait
-            if sensor_data is None:
-                time.sleep(LOOP_SLEEP_TIME); continue # Use the standard loop sleep time
-            gyro_mag = sensor_data['gyro_mag'] # Extract current gyro magnitude
+            if sensor_data is None: time.sleep(LOOP_SLEEP_TIME); continue
+            gyro_mag = sensor_data['gyro_mag']
 
             # --- Rumble Calculation & Sending ---
-            # Calculate intensity based on current motion
             target_intensity = calculate_target_intensity(gyro_mag)
-            # Update the linger state (trigger/decay)
             linger_state = update_linger_state(linger_state, target_intensity, delta_time)
-            # Get the intensity from the (potentially active) linger effect
             current_decaying_intensity = calculate_decaying_intensity(linger_state)
-            # Determine the final intensity to send (max of motion vs linger)
             final_rumble_intensity = determine_final_intensity(target_intensity, current_decaying_intensity)
-            # Send the rumble command to the Joy-Con
             send_rumble_command(joycon, final_rumble_intensity)
 
-            # --- Energy Bar Calculation & Classification ---
-            # Update the recent history of gyro magnitudes
+            # --- Energy Bar Calculation ---
             update_gyro_history(gyro_history, current_time, gyro_mag)
-            # Calculate the rolling average over the history window
             average_gyro_10s = calculate_average_gyro(gyro_history)
-            # Update the smoothed energy level, applying decay rule
             current_energy = update_energy_level(current_energy, gyro_mag, average_gyro_10s, delta_time)
-            # Get the classification string (including level) based on current energy
             current_classification_str = get_typhoon_classification(current_energy)
-            # Generate the text-based energy bar visualization
             energy_bar_str = display_energy_bar(current_energy, MAX_MOTION_GYRO_MAGNITUDE)
 
-            # --- Printing Status ---
-            # Display current simulation state on a single updating line
-            time_elapsed = current_time - loop_start_time
-            print(f"\rTime: {time_elapsed: >4.1f}s | Gyro Now:{gyro_mag: >7.1f} Avg:{average_gyro_10s: >7.1f} | "
-                  f"Energy:{current_energy: >7.1f} {energy_bar_str} | "
-                  f"Rumble:{final_rumble_intensity: >4.2f} | {current_classification_str}        ", # Extra spaces clear previous longer lines
-                  end="")
-            sys.stdout.flush() # Ensure the output buffer is written to the terminal immediately
+            # --- Printing Status (Modified Time Display) ---
+            # Display remaining time instead of elapsed time
+            print(
+                f"\rTime Left: {time_remaining: >4.1f}s | Gyro Now:{gyro_mag: >7.1f} Avg:{average_gyro_10s: >7.1f} | "  # <-- MODIFIED LABEL AND VARIABLE
+                f"Energy:{current_energy: >7.1f} {energy_bar_str} | "
+                f"Rumble:{final_rumble_intensity: >4.2f} | {current_classification_str}        ",
+                end="")
+            sys.stdout.flush()
 
             # --- Accurate Sleep ---
-            # Calculate how much time was spent *in this iteration*
             elapsed_this_iter = time.monotonic() - current_time
-            # Calculate how long to sleep to maintain the target LOOP_SLEEP_TIME interval
             sleep_duration = max(0.0, LOOP_SLEEP_TIME - elapsed_this_iter)
             time.sleep(sleep_duration)
 
