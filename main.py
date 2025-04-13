@@ -8,24 +8,21 @@ import atexit
 joycon_right = None
 
 # --- Constants for Motion-Based Rumble ---
-# Estimated magnitude of acceleration vector due to gravity when at rest
-# Calculated from your example: sqrt(566^2 + (-383)^2 + (-4517)^2) ≈ 4568
-# TODO: Adjust this based on observation if needed.
-RESTING_ACCEL_MAGNITUDE = 4500
-RESTING_GYRO_MAGNITUDE = 20
 
+# -- Gyroscope Settings --
+# Resting gyro magnitude is low (~20), but we only want rumble for significant rotation.
+GYRO_RUMBLE_THRESHOLD = 3000  # Minimum gyro magnitude to START rumbling.
+MAX_MOTION_GYRO_MAGNITUDE = 15000 # Gyro magnitude that corresponds to MAXIMUM rumble intensity (1.0).
 
-# How much acceleration magnitude *above resting* corresponds to full rumble intensity?
-# This requires tuning. Higher value means you need to shake harder for max rumble.
-MAX_MOTION_ACCEL_MAGNITUDE = 40000
-MAX_MOTION_GYRO_MAGNITUDE = 15000
+# -- Accelerometer Settings (Not used for rumble calculation in this version, but kept for reference/printing) --
+RESTING_ACCEL_MAGNITUDE = 4500  # Estimated magnitude of acceleration vector due to gravity when at rest.
+MAX_MOTION_ACCEL_MAGNITUDE = 40000 # How much acceleration magnitude *above resting* corresponds to full rumble intensity?
 
-# TODO: Rumble frequencies (can be adjusted for different feel)
-RUMBLE_LOW_FREQ = 80  # Hz
-RUMBLE_HIGH_FREQ = 160 # Hz
+# -- Rumble Feel Settings --
+RUMBLE_LOW_FREQ = 60  # Hz - Adjusted slightly for potentially different feel
+RUMBLE_HIGH_FREQ = 200 # Hz - Adjusted slightly
+# RUMBLE_INTENSITY_THRESHOLD = 0.05 # This concept is now handled by GYRO_RUMBLE_THRESHOLD
 
-# TODO: Minimum intensity threshold to activate rumble (prevents constant low rumble)
-RUMBLE_INTENSITY_THRESHOLD = 0.05
 # --- End Constants ---
 
 class Debug:
@@ -76,6 +73,95 @@ def initialize_right_joycon():
         import traceback
         traceback.print_exc()
         return None
+
+
+def calculate_gyro_rumble_intensity(gyro_magnitude):
+    """Calculates rumble intensity based on gyroscope magnitude, threshold, and max value."""
+
+    if gyro_magnitude < GYRO_RUMBLE_THRESHOLD:
+        # Below the minimum rotation speed needed for rumble
+        return 0.0
+
+    # Calculate how far the current magnitude is into the active range (Threshold to Max)
+    active_range_size = MAX_MOTION_GYRO_MAGNITUDE - GYRO_RUMBLE_THRESHOLD
+    value_in_range = gyro_magnitude - GYRO_RUMBLE_THRESHOLD
+
+    if active_range_size <= 0:
+        # Avoid division by zero/negative if threshold is >= max
+        # If above threshold, intensity is max (1.0) in this edge case
+        return 1.0
+
+    # Scale the value within the range to [0.0, 1.0]
+    intensity = value_in_range / active_range_size
+
+    # Clamp the intensity to the valid range [0.0, 1.0]
+    # This handles cases where gyro_magnitude exceeds MAX_MOTION_GYRO_MAGNITUDE
+    return clamp(intensity, 0.0, 1.0)
+
+
+def read_gyro_and_rumble(joycon):
+    """Continuously reads sensors, calculates gyro-based rumble, prints, and sends commands."""
+    if not joycon or not isinstance(joycon, RumbleJoyCon):
+        Debug.error("Invalid RumbleJoyCon object provided.")
+        return
+
+    print("\n--- Reading Gyroscope & Applying Rumble (Press Ctrl+C to stop) ---")
+    print(f"Settings: GyroThreshold={GYRO_RUMBLE_THRESHOLD}, GyroMax={MAX_MOTION_GYRO_MAGNITUDE}, Freqs=[{RUMBLE_LOW_FREQ},{RUMBLE_HIGH_FREQ}]")
+
+    try:
+        while True:
+            try:
+                # Read sensor data
+                accel_x = joycon.get_accel_x() # Read accel for printing/reference
+                accel_y = joycon.get_accel_y()
+                accel_z = joycon.get_accel_z()
+                accel_magnitude = math.sqrt(accel_x ** 2 + accel_y ** 2 + accel_z ** 2)
+
+                gyro_x = joycon.get_gyro_x()
+                gyro_y = joycon.get_gyro_y()
+                gyro_z = joycon.get_gyro_z()
+                gyro_magnitude = math.sqrt(gyro_x ** 2 + gyro_y ** 2 + gyro_z ** 2)
+
+                # --- Rumble Calculation (Based on Gyro) ---
+                rumble_intensity = calculate_gyro_rumble_intensity(gyro_magnitude)
+
+                # Create rumble data packet
+                rumble_data_generator = RumbleData(RUMBLE_LOW_FREQ, RUMBLE_HIGH_FREQ, rumble_intensity)
+                rumble_bytes = rumble_data_generator.GetData()
+
+                # Send the rumble command - this overwrites the previous one
+                joycon._send_rumble(rumble_bytes)
+
+                # --- Printing ---
+                print(f"\rGyr:({gyro_x: 5d},{gyro_y: 5d},{gyro_z: 5d}) Mag:{gyro_magnitude: >6.1f} | "
+                      f"Rumble Intensity: {rumble_intensity: >4.2f} | "
+                      # Optional: Print Accel data too for comparison
+                      f"Acc Mag:{accel_magnitude: >6.1f}    ",
+                      end="")
+                sys.stdout.flush()
+
+            except AttributeError as e:
+                 if "'NoneType' object has no attribute" in str(e):
+                     Debug.log("Sensor data not available yet, waiting...")
+                     time.sleep(0.1); continue
+                 else: Debug.error(f"\nAttributeError reading sensor data: {e}"); break
+            except Exception as e:
+                Debug.error(f"\nError during loop: {e}")
+                break # Exit loop on error
+
+            # Control the update rate (adjust as needed for responsiveness vs performance)
+            time.sleep(0.05) # e.g., 20 updates per second
+
+    except KeyboardInterrupt:
+        print("\nStopping data reading and rumble.")
+    finally:
+        # Ensure rumble stops on exit
+        try:
+            print("\nStopping final rumble...")
+            joycon.rumble_stop()
+        except Exception as e:
+            Debug.error(f"Error stopping rumble on exit: {e}")
+        print("\r" + " " * 120 + "\r", end="") # Clear the line
 
 
 def read_and_print_calculated_motion(joycon):
@@ -242,6 +328,21 @@ def test_right_joycon_rumble():
         return False
 
 
+def print_jc_info(joycon):
+    if joycon:
+        print("\nDetailed Joy-Con Information: ")
+        for attr in dir(joycon):
+            if not attr.startswith("__"):
+                try:
+                    value = getattr(joycon, attr)
+                    if callable(value):
+                        print(f"  - {attr}: [Method]")
+                    else:
+                        print(f"  - {attr}: {value}")
+                except:
+                    print(f"  - {attr}: [Error accessing]")
+
+
 # --- Utility and Cleanup functions ---
 def cleanup():
     """Perform cleanup when exiting"""
@@ -261,21 +362,6 @@ def cleanup():
         Debug.error(f"Error during cleanup: {e}")
 
 
-def print_jc_info(joycon):
-    if joycon:
-        print("\nDetailed Joy-Con Information: ")
-        for attr in dir(joycon):
-            if not attr.startswith("__"):
-                try:
-                    value = getattr(joycon, attr)
-                    if callable(value):
-                        print(f"  - {attr}: [Method]")
-                    else:
-                        print(f"  - {attr}: {value}")
-                except:
-                    print(f"  - {attr}: [Error accessing]")
-
-
 if __name__ == "__main__":
     # Register cleanup function to run on exit
     atexit.register(cleanup)
@@ -286,12 +372,13 @@ if __name__ == "__main__":
     if joycon_right:
         # test_right_joycon_rumble()
         # print_jc_info(joycon_right)
-        read_and_print_calculated_motion(joycon_right)
+        # read_and_print_calculated_motion(joycon_right)
+        read_gyro_and_rumble(joycon_right)
 
         # --- Optional: Uncomment to run tests or print info AFTER the main loop finishes ---
         # print("\nSensor reading finished.")
         # test_right_joycon_rumble()
-        # print_jc_info(joycon_right)
+        print_jc_info(joycon_right)
         # --- End Optional ---
     else:
         print("Failed to initialize Right Joy-Con. Exiting.")
