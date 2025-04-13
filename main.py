@@ -11,16 +11,16 @@ joycon_right = None
 
 # -- Gyroscope Settings --
 # Resting gyro magnitude is low (~20), but we only want rumble for significant rotation.
-GYRO_RUMBLE_THRESHOLD = 3000  # Minimum gyro magnitude to START rumbling.
-MAX_MOTION_GYRO_MAGNITUDE = 15000 # Gyro magnitude that corresponds to MAXIMUM rumble intensity (1.0).
+GYRO_RUMBLE_THRESHOLD = 5000  # Minimum gyro magnitude to START rumbling.
+MAX_MOTION_GYRO_MAGNITUDE = 20000 # Gyro magnitude that corresponds to MAXIMUM rumble intensity (1.0).
 
 # -- Accelerometer Settings (Not used for rumble calculation in this version, but kept for reference/printing) --
 RESTING_ACCEL_MAGNITUDE = 4500  # Estimated magnitude of acceleration vector due to gravity when at rest.
 MAX_MOTION_ACCEL_MAGNITUDE = 40000 # How much acceleration magnitude *above resting* corresponds to full rumble intensity?
 
 # -- Rumble Feel Settings --
-RUMBLE_LOW_FREQ = 60  # Hz - Adjusted slightly for potentially different feel
-RUMBLE_HIGH_FREQ = 200 # Hz - Adjusted slightly
+RUMBLE_LOW_FREQ = 300  # Hz - Adjusted slightly for potentially different feel
+RUMBLE_HIGH_FREQ = 800 # Hz - Adjusted slightly
 # RUMBLE_INTENSITY_THRESHOLD = 0.05 # This concept is now handled by GYRO_RUMBLE_THRESHOLD
 
 # --- End Constants ---
@@ -164,170 +164,6 @@ def read_gyro_and_rumble(joycon):
         print("\r" + " " * 120 + "\r", end="") # Clear the line
 
 
-def read_and_print_calculated_motion(joycon):
-    """Continuously reads sensor data, calculates magnitudes, and prints them."""
-    if not joycon:
-        Debug.error("Joy-Con object is invalid.")
-        return
-
-    print("\n--- Reading & Calculating Motion Data (Press Ctrl+C to stop) ---")
-    try:
-        while True:
-            try:
-                accel_x = joycon.get_accel_x()
-                accel_y = joycon.get_accel_y()
-                accel_z = joycon.get_accel_z()
-
-                gyro_x = joycon.get_gyro_x()
-                gyro_y = joycon.get_gyro_y()
-                gyro_z = joycon.get_gyro_z()
-
-                # --- Calculations ---
-                # Calculate the magnitude of the acceleration vector
-                accel_magnitude = math.sqrt(accel_x ** 2 + accel_y ** 2 + accel_z ** 2)
-
-                # Calculate the magnitude of the gyroscope vector (angular velocity magnitude)
-                gyro_magnitude = math.sqrt(gyro_x ** 2 + gyro_y ** 2 + gyro_z ** 2)
-
-                # Calculate acceleration magnitude excluding estimated gravity (motion intensity)
-                # This is a simplified approach; true separation requires sensor fusion (more complex)
-                motion_accel_magnitude = abs(accel_magnitude - RESTING_ACCEL_MAGNITUDE)
-
-                # --- Printing ---
-                # Print raw data and calculated magnitudes on a single updating line
-                print(f"\rAcc:({accel_x: 5d},{accel_y: 5d},{accel_z: 5d}) Mag:{accel_magnitude: >6.1f} | "
-                      f"Gyr:({gyro_x: 5d},{gyro_y: 5d},{gyro_z: 5d}) Mag:{gyro_magnitude: >6.1f} | "
-                      f"Motion Acc Mag:{motion_accel_magnitude: >6.1f}   ",
-                      end="")
-                sys.stdout.flush()
-
-            except AttributeError as e:
-                # Catch cases where sensor data might not be ready immediately
-                if "'NoneType' object has no attribute" in str(e):
-                    Debug.log("Sensor data not available yet, waiting...")
-                    time.sleep(0.1)  # Wait a bit longer if data isn't ready
-                    continue
-                else:
-                    Debug.error(f"\nAttributeError reading sensor data: {e}")
-                    break  # Exit on other AttributeErrors
-            except Exception as e:
-                Debug.error(f"\nError reading/calculating sensor data: {e}")
-                break
-
-            # Control the update rate (e.g., 10 times per second)
-            # Faster gives smoother view of changes, but uses more CPU
-            time.sleep(0.1)
-
-    except KeyboardInterrupt:
-        print("\nStopping data reading.")
-    finally:
-        # Clear the line on exit
-        print("\r" + " " * 120 + "\r", end="")  # Clear a wider space
-
-
-def provide_rumble_feedback(joycon, intensity=0.5, frequency=160, duration=0.5):
-    """
-    Provide haptic feedback through Joy-Con rumble with simplified parameters
-
-    Args:
-        joycon: RumbleJoyCon instance
-        intensity: Rumble intensity from 0.0 to 1.0
-        frequency: Rumble frequency in Hz (recommended range: 40-320)
-        duration: Duration of rumble in seconds
-
-    Returns:
-        bool: True if rumble was successful, False otherwise
-    """
-    if not joycon or not isinstance(joycon, RumbleJoyCon):
-        print("Error: Invalid Joy-Con provided")
-        return False
-
-    try:
-        # Ensure vibration is enabled
-        joycon.enable_vibration(True)
-
-        # Clamp values to safe ranges
-        intensity = clamp(intensity, 0.0, 1.0)
-        frequency = clamp(frequency, 40, 320)
-
-        # Create rumble data with the specified parameters
-        # Using both high and low frequency for a fuller rumble feel
-        rumble_data = RumbleData(frequency / 2, frequency, intensity)
-
-        # Send the rumble command
-        joycon._send_rumble(rumble_data.GetData())
-
-        # Wait for the specified duration
-        time.sleep(duration)
-
-        # Stop the rumble
-        joycon.rumble_stop()
-
-        return True
-
-    except Exception as e:
-        print(f"Rumble error: {str(e)}")
-        return False
-
-
-def test_right_joycon_rumble():
-    """Test rumble specifically on the right Joy-Con using the available methods"""
-    global joycon_right
-
-    if not joycon_right:
-        print("Right Joy-Con not detected.")
-        return False
-
-    print("\n=== Testing Right Joy-Con Rumble ===")
-
-    try:
-        # Step 1: Enable vibration first
-        print("Step 1: Enabling vibration...")
-        joycon_right.enable_vibration()
-        print("Vibration enabled")
-
-        # Step 2: Test rumble_simple method (no parameters)
-        print("\nStep 2: Testing rumble_simple method...")
-        print("Starting rumble...")
-        joycon_right.rumble_simple()  # No parameters here
-
-        import time
-        print("Rumbling for 2 seconds...")
-        time.sleep(2.0)
-
-        # Step 3: Stop rumble
-        print("\nStep 3: Stopping rumble...")
-        joycon_right.rumble_stop()
-        print("Rumble stopped")
-
-        # Step 4: Try using RumbleData for custom rumble patterns
-        print("\nStep 4: Testing custom rumble with RumbleData (low intensity)...")
-        low_rumble = RumbleData(80, 160, 0.3)  # low freq, high freq, amplitude
-        joycon_right._send_rumble(low_rumble.GetData())
-        print("Low intensity rumbling for 2 seconds...")
-        time.sleep(2.0)
-        joycon_right.rumble_stop()
-        print("Rumble stopped")
-
-        # Step 5: Try higher intensity rumble
-        print("\nStep 5: Testing higher intensity rumble...")
-        high_rumble = RumbleData(120, 240, 0.7)  # stronger rumble
-        joycon_right._send_rumble(high_rumble.GetData())
-        print("Higher intensity rumbling for 2 seconds...")
-        time.sleep(2.0)
-        joycon_right.rumble_stop()
-        print("Rumble stopped")
-
-        print("\nRumble testing completed.")
-        return True
-
-    except Exception as e:
-        print(f"Error during rumble testing: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-
 def print_jc_info(joycon):
     if joycon:
         print("\nDetailed Joy-Con Information: ")
@@ -370,16 +206,10 @@ if __name__ == "__main__":
     joycon_right = initialize_right_joycon()
 
     if joycon_right:
-        # test_right_joycon_rumble()
-        # print_jc_info(joycon_right)
-        # read_and_print_calculated_motion(joycon_right)
         read_gyro_and_rumble(joycon_right)
 
-        # --- Optional: Uncomment to run tests or print info AFTER the main loop finishes ---
-        # print("\nSensor reading finished.")
-        # test_right_joycon_rumble()
-        print_jc_info(joycon_right)
-        # --- End Optional ---
+        # Optional: Print detailed information about the Joy-Con
+        # print_jc_info(joycon_right)
     else:
         print("Failed to initialize Right Joy-Con. Exiting.")
 
