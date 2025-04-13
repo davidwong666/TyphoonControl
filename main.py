@@ -106,7 +106,7 @@ BUTTON_METHOD_MAP_RIGHT: Dict[str, Callable[[RumbleJoyCon], bool]] = {
 }
 
 # --- Button Detection Function ---
-def wait_for_button_press(joycon: RumbleJoyCon, target_button: str) -> bool:
+def wait_for_button_press(joycon: RumbleJoyCon, target_button: str) -> bool | None:
     """
     Monitors buttons until the target_button is pressed.
     Returns True if the target button was pressed, False otherwise (e.g., Ctrl+C).
