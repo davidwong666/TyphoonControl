@@ -12,8 +12,8 @@ joycon_right: Optional[RumbleJoyCon] = None # Type hint for clarity
 # --- Constants for Motion-Based Rumble ---
 
 # -- Gyroscope Settings --
-GYRO_RUMBLE_THRESHOLD = 8000
-MAX_MOTION_GYRO_MAGNITUDE = 30000 # Corresponds to ~ Super Typhoon (185 km/h+)
+GYRO_RUMBLE_THRESHOLD = 6000  # Minimum gyro magnitude to START rumbling. <-- MODIFIED
+MAX_MOTION_GYRO_MAGNITUDE = 25000 # Gyro magnitude that corresponds to MAXIMUM rumble intensity (1.0). <-- MODIFIED
 
 # -- Accelerometer Settings (Not used for rumble calculation in this version, but kept for reference/printing) --
 # RESTING_ACCEL_MAGNITUDE = 4500  # Estimated magnitude of acceleration vector due to gravity when at rest.
@@ -42,18 +42,19 @@ ENERGY_SMOOTHING_FACTOR = 0.15 # EMA alpha (smaller = smoother, slower response)
 ENERGY_DECAY_RATE = 0.6 # Rate (fraction/sec) energy decays towards average when overshooting
 
 # -- Typhoon Classification Thresholds (Approx. scaled from km/h to Gyro Mag) --
-# Assuming MAX_MOTION_GYRO_MAGNITUDE (30000) ~= 185 km/h
-_SCALE_FACTOR = MAX_MOTION_GYRO_MAGNITUDE / 185.0
+# Assuming MAX_MOTION_GYRO_MAGNITUDE (now 25000) ~= 185 km/h (Super Typhoon)
+# Recalculate the scale factor
+_SCALE_FACTOR = MAX_MOTION_GYRO_MAGNITUDE / 185.0 # <-- MODIFIED CALCULATION
 TYPHOON_THRESHOLDS = {
-    "熱帶低氣壓 (Tropical Depression)": 41 * _SCALE_FACTOR,     # ~6642
-    "熱帶風暴 (Tropical Storm)": 63 * _SCALE_FACTOR,           # ~10206
-    "強烈熱帶風暴 (Severe Tropical Storm)": 88 * _SCALE_FACTOR, # ~14256
-    "颱風 (Typhoon)": 118 * _SCALE_FACTOR,                      # ~19116
-    "強颱風 (Severe Typhoon)": 150 * _SCALE_FACTOR,             # ~24324
-    "超強颱風 (Super Typhoon)": 185 * _SCALE_FACTOR,          # ~30000
+    "熱帶低氣壓 (Tropical Depression)": 41 * _SCALE_FACTOR,     # Recalculated
+    "熱帶風暴 (Tropical Storm)": 63 * _SCALE_FACTOR,           # Recalculated
+    "強烈熱帶風暴 (Severe Tropical Storm)": 88 * _SCALE_FACTOR, # Recalculated
+    "颱風 (Typhoon)": 118 * _SCALE_FACTOR,                      # Recalculated
+    "強颱風 (Severe Typhoon)": 150 * _SCALE_FACTOR,             # Recalculated
+    "超強颱風 (Super Typhoon)": 185 * _SCALE_FACTOR,          # Recalculated (Should now be MAX_MOTION_GYRO_MAGNITUDE)
 }
 # Sort thresholds for easier lookup
-_SORTED_THRESHOLDS = sorted(TYPHOON_THRESHOLDS.items(), key=lambda item: item[1])
+_SORTED_THRESHOLDS = sorted(TYPHOON_THRESHOLDS.items(), key=lambda item: item[1]) # <-- Updated based on new thresholds
 
 # --- End Constants ---
 
@@ -270,8 +271,10 @@ def read_sensor_data(joycon: RumbleJoyCon) -> Optional[SensorData]:
 
 def calculate_target_intensity(gyro_magnitude: float) -> float:
     """Calculates rumble intensity based *only* on current gyroscope magnitude."""
+    # Uses the updated constants GYRO_RUMBLE_THRESHOLD and MAX_MOTION_GYRO_MAGNITUDE
     if gyro_magnitude < GYRO_RUMBLE_THRESHOLD:
         return 0.0
+    # Calculation range depends on the updated constants
     active_range_size = MAX_MOTION_GYRO_MAGNITUDE - GYRO_RUMBLE_THRESHOLD
     value_in_range = gyro_magnitude - GYRO_RUMBLE_THRESHOLD
     if active_range_size <= 0: # Handle edge case where threshold >= max
@@ -291,39 +294,21 @@ def calculate_decaying_intensity(state: LingerState) -> float:
 
 def update_linger_state(current_state: LingerState, target_intensity: float, delta_time: float) -> LingerState:
     """Updates the lingering state based on current motion intensity and time elapsed."""
+    # Indirectly affected as target_intensity calculation uses the new constants
     new_state = current_state.copy()
-
-    # Calculate the intensity the *current* linger would have *now* if it continued decaying
     potential_decaying_intensity = calculate_decaying_intensity(current_state)
-
-    # --- Trigger/Reset Condition ---
-    # Start a new linger if:
-    # 1. The target intensity from current motion is positive AND
-    # 2. It's greater than the intensity the current linger would have decayed to.
+    # Trigger/Reset Condition logic remains the same, but relies on potentially different target_intensity
     if target_intensity > 0 and target_intensity >= potential_decaying_intensity:
         new_state["active"] = True
         new_state["peak_intensity"] = target_intensity
-        # Scale duration based on this burst's intensity
         new_state["initial_duration"] = target_intensity * MAX_LINGER_DURATION
-        # Reset remaining time to the full duration for this new burst
         new_state["time_remaining"] = new_state["initial_duration"]
-        # Debug.log(f"Linger Trigger/Reset: Peak={target_intensity:.2f}, InitDur={new_state['initial_duration']:.2f}")
-
-    # --- Decay Condition ---
-    # Otherwise, if a linger is already active, decay its remaining time
+    # Decay Condition logic remains the same
     elif new_state["active"]:
         new_state["time_remaining"] -= delta_time
         if new_state["time_remaining"] <= 0:
-            # Linger has ended, reset the state
-            new_state["active"] = False
-            new_state["time_remaining"] = 0.0
-            new_state["peak_intensity"] = 0.0
-            new_state["initial_duration"] = 0.0
-            # Debug.log("Linger Ended")
-        # else:
-            # Debug.log(f"Lingering: Remain={new_state['time_remaining']:.2f}")
-
-    # If no new trigger and not active, state remains inactive
+            new_state["active"] = False; new_state["time_remaining"] = 0.0
+            new_state["peak_intensity"] = 0.0; new_state["initial_duration"] = 0.0
     return new_state
 
 def determine_final_intensity(target_intensity: float, decaying_intensity: float) -> float:
@@ -381,42 +366,34 @@ def calculate_average_gyro(history: deque) -> float:
 
 def update_energy_level(current_energy: float, target_gyro_mag: float, average_gyro: float, delta_time: float) -> float:
     """Calculates the next energy level with smoothing and decay."""
-    # 1. Smooth towards target (EMA-like approach using factor)
-    # A simpler linear interpolation might be easier to tune:
-    # max_increase = MAX_ENERGY_INCREASE_PER_SEC * delta_time
-    # max_decrease = MAX_ENERGY_DECREASE_PER_SEC * delta_time
-    # diff = target_gyro_mag - current_energy
-    # change = clamp(diff, -max_decrease, max_increase)
-    # next_energy = current_energy + change
-
-    # Let's use the EMA factor approach for now:
+    # EMA smoothing part remains the same logic
     next_energy = (ENERGY_SMOOTHING_FACTOR * target_gyro_mag) + \
                   ((1.0 - ENERGY_SMOOTHING_FACTOR) * current_energy)
 
-    # 2. Apply decay if energy is higher than the recent average
+    # Decay logic remains the same
     if next_energy > average_gyro:
         decay_amount = (next_energy - average_gyro) * ENERGY_DECAY_RATE * delta_time
         next_energy -= decay_amount
-        # Ensure decay doesn't overshoot below the average in one step
         next_energy = max(next_energy, average_gyro)
 
-    # 3. Clamp the final energy level
-    return clamp(next_energy, 0.0, MAX_MOTION_GYRO_MAGNITUDE * 1.1) # Allow slight overshoot visually? Or clamp strictly? Let's clamp strictly for now.
-    # return clamp(next_energy, 0.0, MAX_MOTION_GYRO_MAGNITUDE)
+    # Clamp the final energy level using the updated MAX_MOTION_GYRO_MAGNITUDE
+    # This ensures energy level corresponds correctly to the new max gyro value
+    return clamp(next_energy, 0.0, MAX_MOTION_GYRO_MAGNITUDE)
 
 def get_typhoon_classification(magnitude: float) -> str:
     """Returns the typhoon classification based on magnitude."""
+    # Uses the recalculated _SORTED_THRESHOLDS
     if magnitude <= 0:
         return "無風 (Calm)"
-    # Iterate through sorted thresholds
     for name, threshold in _SORTED_THRESHOLDS:
         if magnitude <= threshold:
             return name
-    # If magnitude is above the highest threshold
-    return _SORTED_THRESHOLDS[-1][0] # Return highest category name
+    # If magnitude is above the highest threshold (Super Typhoon)
+    return _SORTED_THRESHOLDS[-1][0]
 
 def display_energy_bar(energy: float, max_energy: float, width: int = 30) -> str:
     """Creates a simple text-based energy bar string."""
+    # The max_energy argument will be MAX_MOTION_GYRO_MAGNITUDE, which is updated
     if max_energy <= 0: return "[ ]"
     fill_level = clamp(energy / max_energy, 0.0, 1.0)
     filled_width = int(fill_level * width)
@@ -464,7 +441,7 @@ def simulation_loop(joycon: RumbleJoyCon):
             linger_state = update_linger_state(linger_state, target_intensity, delta_time)
             current_decaying_intensity = calculate_decaying_intensity(linger_state)
             final_rumble_intensity = determine_final_intensity(target_intensity, current_decaying_intensity)
-            send_rumble_command(joycon, final_rumble_intensity)  # Rumble happens based on its own logic
+            send_rumble_command(joycon, final_rumble_intensity)
 
             # --- Energy Bar Calculation ---
             update_gyro_history(gyro_history, current_time, gyro_mag)
