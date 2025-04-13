@@ -5,15 +5,15 @@ import sys
 import time
 import atexit
 from typing import Tuple, Dict, Optional, TypedDict, Callable
+from collections import deque
 
 joycon_right: Optional[RumbleJoyCon] = None # Type hint for clarity
 
 # --- Constants for Motion-Based Rumble ---
 
 # -- Gyroscope Settings --
-# Resting gyro magnitude is low (~20), but we only want rumble for significant rotation.
-GYRO_RUMBLE_THRESHOLD = 8000  # Minimum gyro magnitude to START rumbling.
-MAX_MOTION_GYRO_MAGNITUDE = 30000 # Gyro magnitude that corresponds to MAXIMUM rumble intensity (1.0).
+GYRO_RUMBLE_THRESHOLD = 8000
+MAX_MOTION_GYRO_MAGNITUDE = 30000 # Corresponds to ~ Super Typhoon (185 km/h+)
 
 # -- Accelerometer Settings (Not used for rumble calculation in this version, but kept for reference/printing) --
 # RESTING_ACCEL_MAGNITUDE = 4500  # Estimated magnitude of acceleration vector due to gravity when at rest.
@@ -28,15 +28,32 @@ RUMBLE_LOW_FREQ = 300  # Hz - Adjusted slightly for potentially different feel
 RUMBLE_HIGH_FREQ = 800 # Hz - Adjusted slightly
 
 # -- Countdown Rumble Settings --
-COUNTDOWN_BASE_FREQ_HZ = 90
-COUNTDOWN_FREQ_STEP_HZ = 30
-COUNTDOWN_BASE_INTENSITY = 0.3
-COUNTDOWN_INTENSITY_STEP = 0.1
-COUNTDOWN_PULSE_DURATION_S = 0.15
-COUNTDOWN_START_PULSE_DURATION_S = 0.2
+COUNTDOWN_BASE_FREQ_HZ = 90; COUNTDOWN_FREQ_STEP_HZ = 30
+COUNTDOWN_BASE_INTENSITY = 0.3; COUNTDOWN_INTENSITY_STEP = 0.1
+COUNTDOWN_PULSE_DURATION_S = 0.15; COUNTDOWN_START_PULSE_DURATION_S = 0.2
 
 # -- Timing --
 LOOP_SLEEP_TIME = 0.05 # Update rate (20 Hz). Important for decay calculation.
+SIMULATION_DURATION_S = 10.0 # Total duration for energy accumulation
+
+# -- Energy Bar Settings --
+ENERGY_HISTORY_DURATION_S = 10.0 # Duration for rolling average calculation
+ENERGY_SMOOTHING_FACTOR = 0.15 # EMA alpha (smaller = smoother, slower response)
+ENERGY_DECAY_RATE = 0.6 # Rate (fraction/sec) energy decays towards average when overshooting
+
+# -- Typhoon Classification Thresholds (Approx. scaled from km/h to Gyro Mag) --
+# Assuming MAX_MOTION_GYRO_MAGNITUDE (30000) ~= 185 km/h
+_SCALE_FACTOR = MAX_MOTION_GYRO_MAGNITUDE / 185.0
+TYPHOON_THRESHOLDS = {
+    "熱帶低氣壓 (Tropical Depression)": 41 * _SCALE_FACTOR,     # ~6642
+    "熱帶風暴 (Tropical Storm)": 63 * _SCALE_FACTOR,           # ~10206
+    "強烈熱帶風暴 (Severe Tropical Storm)": 88 * _SCALE_FACTOR, # ~14256
+    "颱風 (Typhoon)": 118 * _SCALE_FACTOR,                      # ~19116
+    "強颱風 (Severe Typhoon)": 150 * _SCALE_FACTOR,             # ~24324
+    "超強颱風 (Super Typhoon)": 185 * _SCALE_FACTOR,          # ~30000
+}
+# Sort thresholds for easier lookup
+_SORTED_THRESHOLDS = sorted(TYPHOON_THRESHOLDS.items(), key=lambda item: item[1])
 
 # --- End Constants ---
 
@@ -346,59 +363,145 @@ def print_jc_info(joycon):
                 except:
                     print(f"  - {attr}: [Error accessing]")
 
+# --- Energy Bar & Classification Functions ---
+def update_gyro_history(history: deque, current_time: float, gyro_mag: float):
+    """Adds current reading and removes old ones from the history deque."""
+    # Add current reading
+    history.append((current_time, gyro_mag))
+    # Remove entries older than the history duration
+    while history and current_time - history[0][0] > ENERGY_HISTORY_DURATION_S:
+        history.popleft()
+
+def calculate_average_gyro(history: deque) -> float:
+    """Calculates the average gyro magnitude from the history."""
+    if not history:
+        return 0.0
+    total_mag = sum(mag for ts, mag in history)
+    return total_mag / len(history)
+
+def update_energy_level(current_energy: float, target_gyro_mag: float, average_gyro: float, delta_time: float) -> float:
+    """Calculates the next energy level with smoothing and decay."""
+    # 1. Smooth towards target (EMA-like approach using factor)
+    # A simpler linear interpolation might be easier to tune:
+    # max_increase = MAX_ENERGY_INCREASE_PER_SEC * delta_time
+    # max_decrease = MAX_ENERGY_DECREASE_PER_SEC * delta_time
+    # diff = target_gyro_mag - current_energy
+    # change = clamp(diff, -max_decrease, max_increase)
+    # next_energy = current_energy + change
+
+    # Let's use the EMA factor approach for now:
+    next_energy = (ENERGY_SMOOTHING_FACTOR * target_gyro_mag) + \
+                  ((1.0 - ENERGY_SMOOTHING_FACTOR) * current_energy)
+
+    # 2. Apply decay if energy is higher than the recent average
+    if next_energy > average_gyro:
+        decay_amount = (next_energy - average_gyro) * ENERGY_DECAY_RATE * delta_time
+        next_energy -= decay_amount
+        # Ensure decay doesn't overshoot below the average in one step
+        next_energy = max(next_energy, average_gyro)
+
+    # 3. Clamp the final energy level
+    return clamp(next_energy, 0.0, MAX_MOTION_GYRO_MAGNITUDE * 1.1) # Allow slight overshoot visually? Or clamp strictly? Let's clamp strictly for now.
+    # return clamp(next_energy, 0.0, MAX_MOTION_GYRO_MAGNITUDE)
+
+def get_typhoon_classification(magnitude: float) -> str:
+    """Returns the typhoon classification based on magnitude."""
+    if magnitude <= 0:
+        return "無風 (Calm)"
+    # Iterate through sorted thresholds
+    for name, threshold in _SORTED_THRESHOLDS:
+        if magnitude <= threshold:
+            return name
+    # If magnitude is above the highest threshold
+    return _SORTED_THRESHOLDS[-1][0] # Return highest category name
+
+def display_energy_bar(energy: float, max_energy: float, width: int = 30) -> str:
+    """Creates a simple text-based energy bar string."""
+    if max_energy <= 0: return "[ ]"
+    fill_level = clamp(energy / max_energy, 0.0, 1.0)
+    filled_width = int(fill_level * width)
+    bar = "#" * filled_width + "-" * (width - filled_width)
+    return f"[{bar}]"
+
 # --- Main Loop and Cleanup ---
-def rumble_loop(joycon: RumbleJoyCon):
-    """Main loop: reads sensors, calculates/updates rumble, prints status, and sleeps."""
+def simulation_loop(joycon: RumbleJoyCon):
+    """Main simulation loop including rumble and energy bar."""
     if not joycon:
         Debug.error("Invalid JoyCon object passed to rumble_loop.")
         return
 
-    # Ensure vibration is enabled before starting rumble loop
-    try:
-        joycon.enable_vibration(True)
-        Debug.info("Vibration enabled for rumble loop.")
-    except Exception as e:
-        Debug.error(f"Failed to enable vibration before rumble loop: {e}")
-        pass # Continue anyway, _send_rumble might still work
+    print("\n--- Starting Typhoon Simulation (Press Ctrl+C to stop) ---")
+    print(f"Sim Duration: {SIMULATION_DURATION_S:.1f}s | Max Gyro Mag: {MAX_MOTION_GYRO_MAGNITUDE}")
 
-    print("\n--- Reading Gyroscope & Applying Rumble w/ Linger (Refactored) (Press Ctrl+C to stop) ---")
-    print(f"Settings: GyroThr={GYRO_RUMBLE_THRESHOLD}, GyroMax={MAX_MOTION_GYRO_MAGNITUDE}, MaxLinger={MAX_LINGER_DURATION:.2f}s")
+    # Initialize states
+    linger_state: LingerState = {"active": False, "peak_intensity": 0.0, "initial_duration": 0.0, "time_remaining": 0.0}
+    current_energy: float = 0.0
+    gyro_history: deque[Tuple[float, float]] = deque()  # Stores (timestamp, gyro_mag)
 
-    # Initialize linger state
-    linger_state: LingerState = {
-        "active": False,
-        "peak_intensity": 0.0,
-        "initial_duration": 0.0,
-        "time_remaining": 0.0
-    }
+    loop_start_time = time.monotonic()
+    last_time = loop_start_time
+    final_average_gyro = 0.0  # To store the result
 
     try:
-        last_time = time.monotonic()  # For calculating delta_time
         while True:
             current_time = time.monotonic()
             delta_time = max(0.001, current_time - last_time)
             last_time = current_time
+
+            # Check if simulation time is up
+            if current_time - loop_start_time >= SIMULATION_DURATION_S:
+                print("\n--- Simulation Time Ended ---")
+                final_average_gyro = calculate_average_gyro(gyro_history)
+                break  # Exit the main loop
+
+            # 1. Read Sensors
             sensor_data = read_sensor_data(joycon)
             if sensor_data is None: time.sleep(0.05); continue
             gyro_mag = sensor_data['gyro_mag']
+
+            # --- Rumble Calculation & Sending ---
             target_intensity = calculate_target_intensity(gyro_mag)
             linger_state = update_linger_state(linger_state, target_intensity, delta_time)
             current_decaying_intensity = calculate_decaying_intensity(linger_state)
-            final_intensity = determine_final_intensity(target_intensity, current_decaying_intensity)
-            send_rumble_command(joycon, final_intensity)
-            print_status(sensor_data, target_intensity, current_decaying_intensity, final_intensity, linger_state)
-            elapsed_since_loop_start = time.monotonic() - current_time
-            sleep_duration = max(0.0, LOOP_SLEEP_TIME - elapsed_since_loop_start)
+            final_rumble_intensity = determine_final_intensity(target_intensity, current_decaying_intensity)
+            send_rumble_command(joycon, final_rumble_intensity)  # Rumble happens based on its own logic
+
+            # --- Energy Bar Calculation ---
+            update_gyro_history(gyro_history, current_time, gyro_mag)
+            average_gyro_10s = calculate_average_gyro(gyro_history)
+            current_energy = update_energy_level(current_energy, gyro_mag, average_gyro_10s, delta_time)
+            current_classification = get_typhoon_classification(current_energy)
+            energy_bar_str = display_energy_bar(current_energy, MAX_MOTION_GYRO_MAGNITUDE)
+
+            # --- Printing Status ---
+            time_elapsed = current_time - loop_start_time
+            print(f"\rTime: {time_elapsed: >4.1f}s | Gyro Now:{gyro_mag: >7.1f} Avg:{average_gyro_10s: >7.1f} | "
+                  f"Energy:{current_energy: >7.1f} {energy_bar_str} | "
+                  f"Rumble:{final_rumble_intensity: >4.2f} | {current_classification}        ",
+                  end="")  # Added spaces to clear line
+            sys.stdout.flush()
+
+            # --- Accurate Sleep ---
+            elapsed_this_iter = time.monotonic() - current_time
+            sleep_duration = max(0.0, LOOP_SLEEP_TIME - elapsed_this_iter)
             time.sleep(sleep_duration)
     except KeyboardInterrupt:
-        print("\nStopping data reading and rumble.")
+        print("\nSimulation interrupted by user.")
+        final_average_gyro = calculate_average_gyro(gyro_history)  # Calculate average even if interrupted
     finally:
+        # --- Final Output ---
+        print("\n--- Final Results ---")
+        print(f"Average Gyro Magnitude over last {ENERGY_HISTORY_DURATION_S:.1f}s (or less): {final_average_gyro:.1f}")
+        final_classification = get_typhoon_classification(final_average_gyro)
+        print(f"Final Estimated Strength: {final_classification}")
+
+        # Stop rumble
         try:
-            print("\nStopping final rumble...")
+            print("Stopping final rumble...")
             if joycon: joycon.rumble_stop()
         except Exception as e:
             Debug.error(f"Error stopping rumble on exit: {e}")
-        print("\r" + " " * 120 + "\r", end="") # Clear the line
+        print("\r" + " " * 150 + "\r", end="")  # Clear the line
 
 def cleanup():
     """Perform cleanup when exiting"""
@@ -419,19 +522,18 @@ if __name__ == "__main__":
     joycon_right = initialize_right_joycon()
 
     if not joycon_right:
-        print("Failed to initialize Right Joy-Con. Exiting.")
+        print("\nFailed to initialize Right Joy-Con. Exiting.")
+        sys.exit(1)
 
-    # 1. Wait for 'A' button press
     start_signal_received = wait_for_button_press(joycon_right, target_button="A")
 
-    # 2. If 'A' was pressed, perform countdown and start rumble loop
     if start_signal_received:
         perform_countdown_with_rumble(joycon_right)
-        rumble_loop(joycon_right)
+        simulation_loop(joycon_right)
     else:
         print("\nStart signal not received (cancelled or error). Exiting.")
 
     # Uncomment to print detailed Joy-Con info
-    print_jc_info(joycon_right)
+    # print_jc_info(joycon_right)
 
     print("Script finished.")
