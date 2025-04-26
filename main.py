@@ -257,7 +257,6 @@ def rumble_pulse(joycon: RumbleJoyCon, low_freq: float, high_freq: float, intens
             if joycon: joycon.rumble_stop()
         except: pass # Ignore errors during emergency stop
 
-
 # --- Countdown Function ---
 def perform_countdown_with_rumble(joycon: RumbleJoyCon):
     """
@@ -298,7 +297,6 @@ def perform_countdown_with_rumble(joycon: RumbleJoyCon):
     print(start_step[0], flush=True)
     # Short pause after "Start!" before the main simulation loop begins
     time.sleep(max(0.0, 0.2 - start_step[3]))
-
 
 # --- Core Calculation Functions ---
 def read_sensor_data(joycon: RumbleJoyCon) -> Optional[SensorData]:
@@ -684,7 +682,6 @@ def simulation_loop(joycon: RumbleJoyCon):
             Debug.error(f"Error stopping rumble on exit: {e}")
         # Clear the last status line from the console
         print("\r" + " " * 150 + "\r", end="") # Print enough spaces to overwrite typical status line length
-
 
 def cleanup():
     """Performs cleanup actions when the script exits (registered with atexit)."""

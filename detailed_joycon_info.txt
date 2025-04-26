@@ -9,7 +9,7 @@ for attr in dir(joycon_right):
                 print(f"  - {attr}: {value}")
         except:
             print(f"  - {attr}: [Error accessing]")
-------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------
 Detailed Right Joy-Con Information:
   - _ACCEL_COEFF_X: 1
   - _ACCEL_COEFF_Y: 1
